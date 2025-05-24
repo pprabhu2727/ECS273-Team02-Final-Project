@@ -6,6 +6,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
 import numpy as np
 
+from import_data_apis import *
+
 # MongoDB connection (localhost, default port)
 client = AsyncIOMotorClient("mongodb://localhost:27017")
 db = client.bird_tracking
@@ -38,8 +40,8 @@ scientific_names = [
 ]
 
 # US mainland bounds (approximate)
-US_LAT_MIN, US_LAT_MAX = 24.0, 49.0
-US_LON_MIN, US_LON_MAX = -125.0, -66.0
+# US_LAT_MIN, US_LAT_MAX = 24.0, 49.0
+# US_LON_MIN, US_LON_MAX = -125.0, -66.0
 
 # Species-specific regions (simplified for sample data)
 species_regions = {
@@ -56,48 +58,129 @@ species_regions = {
 }
 
 # Function to generate random occurrence data for a species
-def generate_occurrence_data(species_name, num_points=200):
-    region = species_regions[species_name]
-    start_date = datetime(2020, 1, 1)
-    end_date = datetime(2025, 4, 1)
-    date_range = (end_date - start_date).days
+async def generate_occurrence_data(species_name, scientific_name, num_points=200):
+    # Get API data first
+    api_data = await get_species_data(scientific_name)
     
-    occurrences = []
-    
-    for _ in range(num_points):
-        # Random date within range
-        random_days = random.randint(0, date_range)
-        date = start_date + timedelta(days=random_days)
-        date_str = date.strftime("%Y-%m-%d")
+    if api_data and api_data.get('sightings'):
+        # Use API data as base and supplement with generated data if needed
+        occurrences = []
+        api_sightings = api_data['sightings']
         
-        # Random location within species region
-        lat = random.uniform(region["lat"][0], region["lat"][1])
-        lon = random.uniform(region["lon"][0], region["lon"][1])
+        for sighting in api_sightings[:num_points]:
+            # Add temperature and precipitation data (not available from GBIF)
+            date_obj = datetime.strptime(sighting['date'], "%Y-%m-%d")
+            
+            # Climate data
+            # base_temp = 10 + 15 * np.sin((date_obj.month - 1) * np.pi / 6)  # Temperature varies by season
+            # temp_variation = random.uniform(-5, 5)
+            # temperature = base_temp + temp_variation + (sighting['latitude'] - 35) * (-0.5)  # Cooler in the north
+            
+            # precip_base = 50 + 30 * np.sin((date_obj.month - 4) * np.pi / 6)  # Precipitation peaks in July
+            # precip_variation = random.uniform(-20, 20)
+            # precipitation = max(0, precip_base + precip_variation)
+            
+            sighting_date = sighting['date']
+            lattitude = sighting['latitude']
+            longitude = sighting['longitude']
+
+            climate = await get_climate_data(lattitude, longitude, sighting_date)
+            temperature = climate['temperature']
+            precipitation = climate['precipitation']
+
+            occurrences.append({
+                "date": sighting_date,
+                "latitude": lattitude,
+                "longitude": longitude,
+                "count": sighting['count'], # this might always be 1 i think
+                "temperature": round(temperature, 1),
+                "precipitation": round(precipitation, 1)
+            })
         
-        # Random count with seasonal variation
-        base_count = random.randint(1, 15)
-        month_factor = 1.0 + 0.5 * np.sin((date.month - 3) * np.pi / 6)  # Peak in June
-        count = max(1, int(base_count * month_factor))
+        # If we need more data points, generate additional ones
+        if len(occurrences) < num_points:
+            region = species_regions[species_name]
+            start_date = datetime(2020, 1, 1)
+            end_date = datetime(2025, 4, 1)
+            date_range = (end_date - start_date).days
+            
+            for _ in range(num_points - len(occurrences)):
+                # Random date within range
+                random_days = random.randint(0, date_range)
+                date = start_date + timedelta(days=random_days)
+                date_str = date.strftime("%Y-%m-%d")
+                
+                # Random location within species region
+                lat = random.uniform(region["lat"][0], region["lat"][1])
+                lon = random.uniform(region["lon"][0], region["lon"][1])
+                
+                # Random count with seasonal variation
+                base_count = random.randint(1, 15)
+                month_factor = 1.0 + 0.5 * np.sin((date.month - 3) * np.pi / 6)  # Peak in June
+                count = max(1, int(base_count * month_factor))
+                
+                # Climate data
+                base_temp = 10 + 15 * np.sin((date.month - 1) * np.pi / 6)  # Temperature varies by season
+                temp_variation = random.uniform(-5, 5)
+                temperature = base_temp + temp_variation + (lat - 35) * (-0.5)  # Cooler in the north
+                
+                precip_base = 50 + 30 * np.sin((date.month - 4) * np.pi / 6)  # Precipitation peaks in July
+                precip_variation = random.uniform(-20, 20)
+                precipitation = max(0, precip_base + precip_variation)
+                
+                occurrences.append({
+                    "date": date_str,
+                    "latitude": lat,
+                    "longitude": lon,
+                    "count": count,
+                    "temperature": round(temperature, 1),
+                    "precipitation": round(precipitation, 1)
+                })
         
-        # Climate data
-        base_temp = 10 + 15 * np.sin((date.month - 1) * np.pi / 6)  # Temperature varies by season
-        temp_variation = random.uniform(-5, 5)
-        temperature = base_temp + temp_variation + (lat - 35) * (-0.5)  # Cooler in the north
+        return sorted(occurrences, key=lambda x: x["date"])
+    else:
+        # Fallback to generated data if API fails
+        region = species_regions[species_name]
+        start_date = datetime(2020, 1, 1)
+        end_date = datetime(2025, 4, 1)
+        date_range = (end_date - start_date).days
         
-        precip_base = 50 + 30 * np.sin((date.month - 4) * np.pi / 6)  # Precipitation peaks in July
-        precip_variation = random.uniform(-20, 20)
-        precipitation = max(0, precip_base + precip_variation)
+        occurrences = []
         
-        occurrences.append({
-            "date": date_str,
-            "latitude": lat,
-            "longitude": lon,
-            "count": count,
-            "temperature": round(temperature, 1),
-            "precipitation": round(precipitation, 1)
-        })
-    
-    return sorted(occurrences, key=lambda x: x["date"])
+        for _ in range(num_points):
+            # Random date within range
+            random_days = random.randint(0, date_range)
+            date = start_date + timedelta(days=random_days)
+            date_str = date.strftime("%Y-%m-%d")
+            
+            # Random location within species region
+            lat = random.uniform(region["lat"][0], region["lat"][1])
+            lon = random.uniform(region["lon"][0], region["lon"][1])
+            
+            # Random count with seasonal variation
+            base_count = random.randint(1, 15)
+            month_factor = 1.0 + 0.5 * np.sin((date.month - 3) * np.pi / 6)  # Peak in June
+            count = max(1, int(base_count * month_factor))
+            
+            # Climate data
+            base_temp = 10 + 15 * np.sin((date.month - 1) * np.pi / 6)  # Temperature varies by season
+            temp_variation = random.uniform(-5, 5)
+            temperature = base_temp + temp_variation + (lat - 35) * (-0.5)  # Cooler in the north
+            
+            precip_base = 50 + 30 * np.sin((date.month - 4) * np.pi / 6)  # Precipitation peaks in July
+            precip_variation = random.uniform(-20, 20)
+            precipitation = max(0, precip_base + precip_variation)
+            
+            occurrences.append({
+                "date": date_str,
+                "latitude": lat,
+                "longitude": lon,
+                "count": count,
+                "temperature": round(temperature, 1),
+                "precipitation": round(precipitation, 1)
+            })
+        
+        return sorted(occurrences, key=lambda x: x["date"])
 
 # Function to generate forecast data
 def generate_forecast_data(species_name):
@@ -212,7 +295,7 @@ async def import_data_to_mongodb():
     
     # Insert occurrence data for each species
     for i, species_name in enumerate(species):
-        occurrences = generate_occurrence_data(species_name)
+        occurrences = await generate_occurrence_data(species_name, scientific_names[i])
         await db.species_occurrences.insert_one({
             "species": species_name,
             "scientific_name": scientific_names[i],
