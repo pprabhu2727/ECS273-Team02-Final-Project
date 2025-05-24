@@ -22,7 +22,9 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
     const height = svgRef.current.parentElement?.clientHeight || 300;
     const margin = { top: 20, right: 30, bottom: 40, left: 60 };
     const chartWidth = width - margin.left - margin.right;
-    const chartHeight = height - margin.top - margin.bottom;    // Order data chronologically
+    const chartHeight = height - margin.top - margin.bottom;
+
+    // Order data chronologically
     const sortedData = [...data].sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.month - b.month;
@@ -107,7 +109,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .curve(d3.curveMonotoneX);
     
     // Draw historical line
-    if (historicalData.length) {
+    if (historicalData.length > 0) {
       chartGroup.append("path")
         .datum(historicalData)
         .attr("class", "historical-line")
@@ -118,22 +120,26 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
     }
     
     // Draw forecast line (if there is forecast data)
-    if (forecastData.length) {
+    if (forecastData.length > 0) {
       // Connect last historical point with first forecast point
-      const connectorData = [
-        historicalData[historicalData.length - 1],
-        forecastData[0]
-      ];
-      
-      // Add dashed line for forecast
-      chartGroup.append("path")
-        .datum(connectorData)
-        .attr("class", "connector-line")
-        .attr("fill", "none")
-        .attr("stroke", "#4285F4")
-        .attr("stroke-width", 2)
-        .attr("stroke-dasharray", "5,5")
-        .attr("d", line);
+      if (historicalData.length > 0) {
+        const connectorData = [
+          historicalData[historicalData.length - 1],
+          forecastData[0]
+        ].filter(d => d !== undefined); // Filter out undefined values
+        
+        if (connectorData.length === 2) {
+          // Add dashed line for forecast
+          chartGroup.append("path")
+            .datum(connectorData)
+            .attr("class", "connector-line")
+            .attr("fill", "none")
+            .attr("stroke", "#4285F4")
+            .attr("stroke-width", 2)
+            .attr("stroke-dasharray", "5,5")
+            .attr("d", line);
+        }
+      }
       
       chartGroup.append("path")
         .datum(forecastData)
@@ -182,17 +188,19 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .text("Current Date");
       
     // Add dots for each data point
-    chartGroup.selectAll(".historical-dot")
-      .data(historicalData)
-      .enter()
-      .append("circle")
-      .attr("class", "historical-dot")
-      .attr("cx", d => xScale(new Date(d.year, d.month - 1)))
-      .attr("cy", d => yScale(d.count_prediction))
-      .attr("r", 4)
-      .attr("fill", "#4285F4")
-      .append("title")
-      .text(d => `${d.year}-${d.month}: ${d.count_prediction}`);
+    if (historicalData.length > 0) {
+      chartGroup.selectAll(".historical-dot")
+        .data(historicalData)
+        .enter()
+        .append("circle")
+        .attr("class", "historical-dot")
+        .attr("cx", d => xScale(new Date(d.year, d.month - 1)))
+        .attr("cy", d => yScale(d.count_prediction))
+        .attr("r", 4)
+        .attr("fill", "#4285F4")
+        .append("title")
+        .text(d => `${d.year}-${d.month}: ${d.count_prediction}`);
+    }
       
     // Add legend
     const legend = chartGroup.append("g")
@@ -251,25 +259,27 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       // Get the latest forecast point
       const latest = forecastData[forecastData.length - 1];
       
-      rangeIndicator.append("text")
-        .attr("x", 10)
-        .attr("y", 35)
-        .text(`North: ${latest.range_north > 0 ? "+" : ""}${latest.range_north.toFixed(2)}°`);
-        
-      rangeIndicator.append("text")
-        .attr("x", 10)
-        .attr("y", 50)
-        .text(`South: ${latest.range_south > 0 ? "+" : ""}${latest.range_south.toFixed(2)}°`);
-        
-      rangeIndicator.append("text")
-        .attr("x", 10)
-        .attr("y", 65)
-        .text(`East: ${latest.range_east > 0 ? "+" : ""}${latest.range_east.toFixed(2)}°`);
-        
-      rangeIndicator.append("text")
-        .attr("x", 10)
-        .attr("y", 80)
-        .text(`West: ${latest.range_west > 0 ? "+" : ""}${latest.range_west.toFixed(2)}°`);
+      if (latest) {
+        rangeIndicator.append("text")
+          .attr("x", 10)
+          .attr("y", 35)
+          .text(`North: ${latest.range_north > 0 ? "+" : ""}${latest.range_north.toFixed(2)}°`);
+          
+        rangeIndicator.append("text")
+          .attr("x", 10)
+          .attr("y", 50)
+          .text(`South: ${latest.range_south > 0 ? "+" : ""}${latest.range_south.toFixed(2)}°`);
+          
+        rangeIndicator.append("text")
+          .attr("x", 10)
+          .attr("y", 65)
+          .text(`East: ${latest.range_east > 0 ? "+" : ""}${latest.range_east.toFixed(2)}°`);
+          
+        rangeIndicator.append("text")
+          .attr("x", 10)
+          .attr("y", 80)
+          .text(`West: ${latest.range_west > 0 ? "+" : ""}${latest.range_west.toFixed(2)}°`);
+      }
     }
     
   }, [data, timeRange, currentDate]);
