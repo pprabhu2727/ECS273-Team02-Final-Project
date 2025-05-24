@@ -116,3 +116,13 @@ async def get_all_species_data():
         await asyncio.sleep(1)
 
     return results
+
+
+from geopy.geocoders import Nominatim
+def get_location(longitude, latitude):
+    geolocator = Nominatim(user_agent="geoapiExercises")
+    location = geolocator.reverse((latitude, longitude), language='en')
+    address = location.raw['address']
+    city = address.get('city') or address.get('town') or address.get('village') or ''
+    state = address.get('state', '')
+    return city, state
