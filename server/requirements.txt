@@ -5,3 +5,5 @@ pydantic
 pandas
 asyncio
 numpy
+aiohttp
+geopy
