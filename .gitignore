@@ -1,0 +1,17 @@
+# Cache files and directories
+.cache/
+**/cache/
+*.cache
+__pycache__/
+*.py[cod]
+*$py.class
+node_modules/
+.npm
+.eslintcache
+.stylelintcache
+.parcel-cache/
+.pyc
+
+# VSCode specific cache
+.vscode/.cache/
+.vscode-server/

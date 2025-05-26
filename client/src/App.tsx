@@ -20,17 +20,20 @@ export default function App() {
   const [seasonalData, setSeasonalData] = useState<SeasonalDataPoint[]>([]);
   const [showClimate, setShowClimate] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
-    // Timeline slider configuration
+    // Timeline slider configuration with fixed values
+  const histYear = 2025
+  const histMonth = 4  // April (1-based)
+  
   const [timeRange, setTimeRange] = useState<TimeRange>({
     startYear: 2020,
     startMonth: 2,
     endYear: 2030,
     endMonth: 12,
-    currentYear: 2023,
-    currentMonth: 5
+    currentYear: histYear,
+    currentMonth: histMonth
   });
   
-  const [currentDate, setCurrentDate] = useState<string>("2023-06-01");
+  const [currentDate, setCurrentDate] = useState<string>(`${histYear}-${histMonth.toString().padStart(2, '0')}-01`);
     // Load available bird species when app starts
   useEffect(() => {
     setLoading(true);
@@ -68,20 +71,23 @@ export default function App() {
       .then(res => res.json())
       .then((data: SpeciesOccurrence) => {
         setOccurrenceData(data.occurrences);
-          // Set timeline to match available data
+          
+        // Set timeline range but keep currentYear/currentMonth fixed
         if (data.occurrences.length > 0) {
           const dates = data.occurrences.map(d => new Date(d.date));
           const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
-          const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+          
           setTimeRange(prev => ({
             ...prev,
             startYear: minDate.getFullYear(),
             startMonth: minDate.getMonth() + 2,
-            currentYear: maxDate.getFullYear(),
-            currentMonth: maxDate.getMonth(),
+            // Don't override current position:
+            // currentYear: maxDate.getFullYear(),
+            // currentMonth: maxDate.getMonth(),
           }));
           
-          setCurrentDate(maxDate.toISOString().split('T')[0]);
+          // Don't override the current date either
+          // setCurrentDate(maxDate.toISOString().split('T')[0]);
         }
       })
       .catch(error => console.error("Error fetching occurrence data:", error));
@@ -207,6 +213,7 @@ export default function App() {
                     data={forecastData}
                     timeRange={timeRange}
                     currentDate={currentDate}
+                    lastHistoricalDate={`${histYear}-${histMonth}`} 
                   />
                 ) : (
                   <p className="text-center text-gray-500 mt-20">No forecast data available</p>

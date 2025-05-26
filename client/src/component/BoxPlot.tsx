@@ -161,10 +161,9 @@ export default function BoxPlot({ data, currentYear }: BoxPlotProps) {
         .append("title")
         .text(`Average: ${d.average_count}`);
     });
-    
-    // Add legend
+      // Add legend (fixed to top right corner)
     const legend = chartGroup.append("g")
-      .attr("transform", `translate(${chartWidth - 120}, ${chartHeight - 80})`);
+      .attr("transform", `translate(${chartWidth - 50}, 10)`);
     
     // Box
     legend.append("rect")
