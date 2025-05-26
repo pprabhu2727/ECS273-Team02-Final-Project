@@ -1,0 +1,20 @@
+{
+    "files.watcherExclude": {
+        "**/.cache/**": true,
+        "**/cache/**": true,
+        "**/__pycache__/**": true,
+        "**/*.py[cod]": true,
+        "**/*$py.class": true,
+        "**/node_modules/**": true,
+        "**/.npm/**": true,
+        "**/.eslintcache": true,
+        "**/.stylelintcache": true,
+        "**/.parcel-cache/**": true
+    },
+    "files.exclude": {
+        "**/.cache/**": true,
+        "**/cache/**": true,
+        "**/__pycache__/**": true,
+        "**/node_modules/**": true
+    }
+}
