@@ -274,38 +274,8 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
               const avgPrecip = d3.mean(d as CustomPoint[], (p: CustomPoint) => p.precipitation);
               return `Total birds: ${totalCount.toFixed(0)}\nAvg temperature: ${avgTemp?.toFixed(1)}°C\nAvg precipitation: ${avgPrecip?.toFixed(1)}mm`;
             });        // Show temperature gradient overlay when enabled
-        if (showClimate) {
-          const tempExtent = d3.extent(filteredOccurrences, d => d.temperature) as [number, number];
-          if (tempExtent[0] != null && tempExtent[1] != null && !isNaN(tempExtent[0]) && !isNaN(tempExtent[1]) && tempExtent[0] !== tempExtent[1]) {
-            const tempColorScale = d3.scaleSequential(d3.interpolateRdBu)
-              .domain([tempExtent[1], tempExtent[0]]);
-            const legendHeight = 10;
-            const legendWidth = 150;
-            const legendX = mapWidth - legendWidth - 20;
-            const legendY = 20;
-            const defs = svg.append("defs");
-            const gradient = defs.append("linearGradient")
-              .attr("id", "temp-gradient")
-              .attr("x1", "0%")
-              .attr("x2", "100%")
-              .attr("y1", "0%")
-              .attr("y2", "0%");
-            gradient.append("stop")
-              .attr("offset", "0%")
-              .attr("stop-color", tempColorScale(tempExtent[0]));
-            gradient.append("stop")
-              .attr("offset", "100%")
-              .attr("stop-color", tempColorScale(tempExtent[1]));
-            svg.append("rect")
-              .attr("x", legendX)
-              .attr("y", legendY)
-              .attr("width", legendWidth)
-              .attr("height", legendHeight)
-              .style("fill", "url(#temp-gradient)");
-            svg.append("text")
-              .attr("x", legendX)
-          }
-          // Add hexbin density legend
+         
+        // Add hexbin density legend
           const densityLegend = svg.append("g")
             .attr("transform", `translate(20, 20)`);
           densityLegend.append("text")
@@ -332,14 +302,47 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
               .attr("font-size", "10px")
               .attr("alignment-baseline", "middle")
               .text(value.toString());
-          });
-        } else {
-          svg.append("text")
-            .attr("x", mapWidth / 2)
-            .attr("y", mapHeight / 2)
-            .attr("text-anchor", "middle")
-            .text("No occurrence data for this date");
-        }
+          });    
+
+        const legendHeight = 10;
+        const legendWidth = 150;
+        const legendX = mapWidth - legendWidth - 20;
+        const legendY = 20;
+        // Show climate data overlay when enabled
+        if (showClimate) {
+          const tempExtent = d3.extent(filteredOccurrences, d => d.temperature) as [number, number];  
+          if (tempExtent[0] != null && tempExtent[1] != null && !isNaN(tempExtent[0]) && !isNaN(tempExtent[1]) && tempExtent[0] !== tempExtent[1]) {
+            const tempColorScale = d3.scaleSequential(d3.interpolateRdBu)
+              .domain([tempExtent[1], tempExtent[0]]);
+            const defs = svg.append("defs");
+            const gradient = defs.append("linearGradient")
+              .attr("id", "temp-gradient")
+              .attr("x1", "0%")
+              .attr("x2", "100%")
+              .attr("y1", "0%")
+              .attr("y2", "0%");
+            gradient.append("stop")
+              .attr("offset", "0%")
+              .attr("stop-color", tempColorScale(tempExtent[0]));
+            gradient.append("stop")
+              .attr("offset", "100%")
+              .attr("stop-color", tempColorScale(tempExtent[1]));
+            svg.append("rect")
+              .attr("x", legendX)
+              .attr("y", legendY)
+              .attr("width", legendWidth)
+              .attr("height", legendHeight)
+              .style("fill", "url(#temp-gradient)");
+            svg.append("text")
+              .attr("x", legendX)
+          } else {
+            svg.append("text")
+              .attr("x", legendX)
+              .attr("y", legendY)
+              .attr("text-anchor", "middle")
+              .text("No climate data for this date");
+          }
+        } 
       } catch (err) {
         console.error('Error rendering overlays:', err);
         svg.append("text")
