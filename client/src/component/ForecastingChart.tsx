@@ -6,9 +6,15 @@ interface ForecastingChartProps {
   data: ForecastPoint[];
   timeRange: TimeRange;
   currentDate: string;
+  lastHistoricalDate: string; // Cutoff point between real data and predictions (format: "YYYY-MM")
 }
 
-export default function ForecastingChart({ data, timeRange, currentDate }: ForecastingChartProps) {
+export default function ForecastingChart({ 
+  data, 
+  timeRange, 
+  currentDate,
+  lastHistoricalDate = "2025-4" // Default cutoff date in YYYY-MM format
+}: ForecastingChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   
   useEffect(() => {
@@ -17,20 +23,20 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
     
-    // Get dimensions
+    // Setup chart dimensions
     const width = svgRef.current.parentElement?.clientWidth || 600;
     const height = svgRef.current.parentElement?.clientHeight || 300;
     const margin = { top: 20, right: 30, bottom: 40, left: 60 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
 
-    // Order data chronologically
+    // Sort data by date
     const sortedData = [...data].sort((a, b) => {
       if (a.year !== b.year) return a.year - b.year;
       return a.month - b.month;
     });
     
-    // Create x-scale using time
+    // Set up time scale for x-axis
     const xExtent: [Date, Date] = [
       new Date(timeRange.startYear, timeRange.startMonth - 1),
       new Date(timeRange.endYear, timeRange.endMonth - 1)
@@ -40,18 +46,18 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .domain(xExtent)
       .range([0, chartWidth]);
     
-    // Create y-scale for count predictions
+    // Set up linear scale for y-axis
     const yMax = d3.max(sortedData, d => d.count_prediction) || 0;
     const yScale = d3.scaleLinear()
-      .domain([0, yMax * 1.1]) // Add some padding
+      .domain([0, yMax * 1.1]) // Add padding
       .range([chartHeight, 0]);
     
-    // Create group for chart
+    // Create chart container
     const chartGroup = svg
       .append("g")
       .attr("transform", `translate(${margin.left}, ${margin.top})`);
     
-    // Add axes
+    // Create axes
     const xAxis = d3.axisBottom(xScale)
       .ticks(width > 500 ? 10 : 5)
       .tickFormat(d => d3.timeFormat("%Y-%m")(d as Date));
@@ -59,7 +65,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
     const yAxis = d3.axisLeft(yScale)
       .ticks(height > 300 ? 10 : 5);
     
-    // Append axes
+    // Add axes to chart
     chartGroup.append("g")
       .attr("class", "x-axis")
       .attr("transform", `translate(0, ${chartHeight})`)
@@ -74,7 +80,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("class", "y-axis")
       .call(yAxis);
     
-    // Add labels
+    // Add axis labels
     chartGroup.append("text")
       .attr("class", "x-axis-label")
       .attr("text-anchor", "middle")
@@ -90,28 +96,58 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("y", -margin.left + 15)
       .text("Bird Count");
     
-    // Split data into historical and forecast
+    // Parse year and month from the cutoff date string
+    const [lastHistYear, lastHistMonth] = lastHistoricalDate.split('-').map(Number);
+    
+    // Reference dates for filtering data
     const currentDateObj = new Date(currentDate);
-    const historicalData = sortedData.filter(d => {
+    
+    // Split data based on the cutoff between real observations and forecast
+    const actualHistoricalData = sortedData.filter(d => {
+      return d.year < lastHistYear || 
+             (d.year === lastHistYear && d.month <= lastHistMonth);
+    });
+    
+    // Everything after the cutoff date is forecast data
+    const actualForecastData = sortedData.filter(d => {
+      return d.year > lastHistYear || 
+             (d.year === lastHistYear && d.month > lastHistMonth);
+    });
+    
+    // Historical data before current slider date
+    const displayHistoricalData = actualHistoricalData.filter(d => {
       const dataDate = new Date(d.year, d.month - 1);
       return dataDate <= currentDateObj;
     });
     
-    const forecastData = sortedData.filter(d => {
+    // Forecast data after current slider date
+    const displayForecastData = actualForecastData.filter(d => {
       const dataDate = new Date(d.year, d.month - 1);
       return dataDate > currentDateObj;
     });
     
-    // Create a line generator
+    // Historical data that's in the "future" (when slider is moved to the past)
+    const futurePastData = actualHistoricalData.filter(d => {
+      const dataDate = new Date(d.year, d.month - 1);
+      return dataDate > currentDateObj;
+    });
+    
+    // Forecast data that's in the "past" (when slider is moved to the future)
+    const pastFutureData = actualForecastData.filter(d => {
+      const dataDate = new Date(d.year, d.month - 1);
+      return dataDate <= currentDateObj;
+    });
+    
+    // Create line generator
     const line = d3.line<ForecastPoint>()
       .x(d => xScale(new Date(d.year, d.month - 1)))
       .y(d => yScale(d.count_prediction))
       .curve(d3.curveMonotoneX);
     
-    // Draw historical line
-    if (historicalData.length > 0) {
+    // Draw blue solid line for historical data up to current date
+    if (displayHistoricalData.length > 0) {
       chartGroup.append("path")
-        .datum(historicalData)
+        .datum(displayHistoricalData)
         .attr("class", "historical-line")
         .attr("fill", "none")
         .attr("stroke", "#4285F4")
@@ -119,20 +155,19 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
         .attr("d", line);
     }
     
-    // Draw forecast line (if there is forecast data)
-    if (forecastData.length > 0) {
-      // Connect last historical point with first forecast point
-      if (historicalData.length > 0) {
+    // Draw blue dashed line for known data after the current date
+    if (futurePastData.length > 0) {
+      // Connect to last historical point
+      if (displayHistoricalData.length > 0) {
         const connectorData = [
-          historicalData[historicalData.length - 1],
-          forecastData[0]
-        ].filter(d => d !== undefined); // Filter out undefined values
+          displayHistoricalData[displayHistoricalData.length - 1],
+          futurePastData[0]
+        ].filter(d => d !== undefined);
         
         if (connectorData.length === 2) {
-          // Add dashed line for forecast
           chartGroup.append("path")
             .datum(connectorData)
-            .attr("class", "connector-line")
+            .attr("class", "connector-line-blue")
             .attr("fill", "none")
             .attr("stroke", "#4285F4")
             .attr("stroke-width", 2)
@@ -142,7 +177,82 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       }
       
       chartGroup.append("path")
-        .datum(forecastData)
+        .datum(futurePastData)
+        .attr("class", "future-historical-line")
+        .attr("fill", "none")
+        .attr("stroke", "#4285F4")
+        .attr("stroke-width", 3)
+        .attr("stroke-dasharray", "5,5")
+        .attr("d", line);
+    }
+    
+    // Draw red solid line for forecast data that's before current date
+    if (pastFutureData.length > 0) {
+      chartGroup.append("path")
+        .datum(pastFutureData)
+        .attr("class", "past-forecast-line")
+        .attr("fill", "none")
+        .attr("stroke", "#DB4437")
+        .attr("stroke-width", 3)
+        .attr("d", line);
+    }
+    
+    // Draw red dashed line for forecast data after current date
+    if (displayForecastData.length > 0) {
+      // Handle connection to past forecast data
+      if (pastFutureData.length > 0) {
+        const lastPastFuture = pastFutureData[pastFutureData.length - 1];
+        const firstDisplayForecast = displayForecastData[0];
+        
+        // Only connect points that are close in time
+        const lastPastDate = new Date(lastPastFuture.year, lastPastFuture.month - 1);
+        const firstForecastDate = new Date(firstDisplayForecast.year, firstDisplayForecast.month - 1);
+        
+        const monthDiff = (firstForecastDate.getFullYear() - lastPastDate.getFullYear()) * 12 + 
+                         (firstForecastDate.getMonth() - lastPastDate.getMonth());
+                          
+        if (monthDiff <= 2) {
+          const connectorData = [lastPastFuture, firstDisplayForecast];
+          
+          chartGroup.append("path")
+            .datum(connectorData)
+            .attr("class", "connector-line-red")
+            .attr("fill", "none")
+            .attr("stroke", "#DB4437")
+            .attr("stroke-width", 2)
+            .attr("stroke-dasharray", "5,5")
+            .attr("d", line);
+        }
+      }
+      // Connect to historical data if needed and appropriate
+      else if (displayHistoricalData.length > 0) {
+        const lastHistoricalPoint = displayHistoricalData[displayHistoricalData.length - 1];
+        const firstForecastPoint = displayForecastData[0];
+        
+        const lastHistDate = new Date(lastHistoricalPoint.year, lastHistoricalPoint.month - 1);
+        const firstForecastDate = new Date(firstForecastPoint.year, firstForecastPoint.month - 1);
+        
+        const monthDiff = (firstForecastDate.getFullYear() - lastHistDate.getFullYear()) * 12 + 
+                         (firstForecastDate.getMonth() - lastHistDate.getMonth());
+        
+        // Only connect if points are close in time and current date is near transition
+        if (monthDiff <= 2 && Math.abs(lastHistDate.getTime() - currentDateObj.getTime()) < 45 * 24 * 60 * 60 * 1000) {
+          const connectorData = [lastHistoricalPoint, firstForecastPoint];
+          
+          chartGroup.append("path")
+            .datum(connectorData)
+            .attr("class", "connector-line-mixed")
+            .attr("fill", "none")
+            .attr("stroke", "#9E42F5") // Purple for historical-to-forecast transition
+            .attr("stroke-width", 2)
+            .attr("stroke-dasharray", "5,5")
+            .attr("d", line);
+        }
+      }
+      
+      // Draw the forecast projection line
+      chartGroup.append("path")
+        .datum(displayForecastData)
         .attr("class", "forecast-line")
         .attr("fill", "none")
         .attr("stroke", "#DB4437")
@@ -150,7 +260,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
         .attr("stroke-dasharray", "5,5")
         .attr("d", line);
         
-      // Add forecast confidence interval (simple +/- 10% for demo)
+      // Add confidence interval for forecast
       const areaGenerator = d3.area<ForecastPoint>()
         .x(d => xScale(new Date(d.year, d.month - 1)))
         .y0(d => yScale(d.count_prediction * 0.9))
@@ -158,14 +268,54 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
         .curve(d3.curveMonotoneX);
         
       chartGroup.append("path")
-        .datum(forecastData)
+        .datum(displayForecastData)
         .attr("class", "forecast-area")
         .attr("fill", "#DB4437")
         .attr("fill-opacity", 0.2)
         .attr("d", areaGenerator);
     }
     
-    // Add a vertical line for current date
+    // Improve connector lines for historical data
+    if (futurePastData.length > 0) {
+      if (displayHistoricalData.length > 0) {
+        const lastHistPoint = displayHistoricalData[displayHistoricalData.length - 1];
+        const firstFuturePastPoint = futurePastData[0];
+        
+        const lastHistDate = new Date(lastHistPoint.year, lastHistPoint.month - 1);
+        const firstFutureDate = new Date(firstFuturePastPoint.year, firstFuturePastPoint.month - 1);
+        
+        const monthDiff = (firstFutureDate.getFullYear() - lastHistDate.getFullYear()) * 12 + 
+                         (firstFutureDate.getMonth() - lastHistDate.getMonth());
+        
+        // Only connect if points are close in time and current date is near transition
+        if (monthDiff <= 2 && Math.abs(lastHistDate.getTime() - currentDateObj.getTime()) < 45 * 24 * 60 * 60 * 1000) {
+          const connectorData = [lastHistPoint, firstFuturePastPoint];
+          
+          chartGroup.append("path")
+            .datum(connectorData)
+            .attr("class", "connector-line-blue")
+            .attr("fill", "none")
+            .attr("stroke", "#4285F4")
+            .attr("stroke-width", 2)
+            .attr("stroke-dasharray", "5,5")
+            .attr("d", line);
+        }
+      }
+      
+      // Draw blue dashed line for future historical data
+      if (futurePastData.length > 0) {
+        chartGroup.append("path")
+          .datum(futurePastData)
+          .attr("class", "future-historical-line")
+          .attr("fill", "none")
+          .attr("stroke", "#4285F4")
+          .attr("stroke-width", 3)
+          .attr("stroke-dasharray", "5,5")
+          .attr("d", line);
+      }
+    }
+    
+    // Add current date marker
     chartGroup.append("line")
       .attr("class", "current-date-line")
       .attr("x1", xScale(currentDateObj))
@@ -176,7 +326,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("stroke-width", 2)
       .attr("stroke-dasharray", "5,5");
       
-    // Add a label for current date
+    // Label current date
     chartGroup.append("text")
       .attr("class", "current-date-label")
       .attr("x", xScale(currentDateObj))
@@ -187,26 +337,24 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("font-weight", "bold")
       .text("Current Date");
       
-    // Add dots for each data point
-    if (historicalData.length > 0) {
-      chartGroup.selectAll(".historical-dot")
-        .data(historicalData)
-        .enter()
-        .append("circle")
-        .attr("class", "historical-dot")
-        .attr("cx", d => xScale(new Date(d.year, d.month - 1)))
-        .attr("cy", d => yScale(d.count_prediction))
-        .attr("r", 4)
-        .attr("fill", "#4285F4")
-        .append("title")
-        .text(d => `${d.year}-${d.month}: ${d.count_prediction}`);
-    }
+    // Add blue dots for historical data points
+    chartGroup.selectAll(".historical-dot")
+      .data(actualHistoricalData)
+      .enter()
+      .append("circle")
+      .attr("class", "historical-dot")
+      .attr("cx", d => xScale(new Date(d.year, d.month - 1)))
+      .attr("cy", d => yScale(d.count_prediction))
+      .attr("r", 4)
+      .attr("fill", "#4285F4")
+      .append("title")
+      .text(d => `${d.year}-${d.month}: ${d.count_prediction} (historical)`);
       
-    // Add legend
+    // Add chart legend
     const legend = chartGroup.append("g")
       .attr("transform", `translate(${chartWidth - 150}, 10)`);
       
-    // Historical data
+    // Historical data legend entry
     legend.append("line")
       .attr("x1", 0)
       .attr("y1", 0)
@@ -220,7 +368,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("y", 5)
       .text("Historical Data");
       
-    // Forecast data
+    // Forecast data legend entry  
     legend.append("line")
       .attr("x1", 0)
       .attr("y1", 20)
@@ -235,8 +383,8 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       .attr("y", 25)
       .text("Forecast Data");
       
-    // Range shift indicators
-    if (forecastData.length > 0) {
+    // Show range shift information
+    if (displayForecastData.length > 0) {
       const rangeIndicator = chartGroup.append("g")
         .attr("class", "range-shift-indicator")
         .attr("transform", `translate(10, ${chartHeight - 100})`);
@@ -256,8 +404,8 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
         .attr("font-weight", "bold")
         .text("Projected Range Shifts");
         
-      // Get the latest forecast point
-      const latest = forecastData[forecastData.length - 1];
+      // Show latest forecast metrics
+      const latest = displayForecastData[displayForecastData.length - 1];
       
       if (latest) {
         rangeIndicator.append("text")
@@ -282,7 +430,7 @@ export default function ForecastingChart({ data, timeRange, currentDate }: Forec
       }
     }
     
-  }, [data, timeRange, currentDate]);
+  }, [data, timeRange, currentDate, lastHistoricalDate]);
   
   return (
     <div className="w-full h-full">

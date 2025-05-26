@@ -23,14 +23,17 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [mapWidth, setMapWidth] = useState(0);
-  const [mapHeight, setMapHeight] = useState(0);  // Show bird sightings for the selected month/year
+  const [mapHeight, setMapHeight] = useState(0);
+  
+  // Filter occurrences for the current month/year
   const filteredOccurrences = occurrences.filter(d => {
     const occDate = new Date(d.date);
     const currDate = new Date(currentDate);
     return occDate.getFullYear() === currDate.getFullYear() && 
            occDate.getMonth() === currDate.getMonth();
   });
-    useEffect(() => {
+
+  useEffect(() => {
     if (!containerRef.current || !svgRef.current) return;
     
     // Make the map responsive to container size changes
@@ -77,7 +80,9 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
       .attr("x", -mapWidth * 0.05)
       .attr("y", -mapHeight * 0.05)
       .attr("width", mapWidth * 1.1)
-      .attr("height", mapHeight * 1.1);    // Convert TopoJSON to GeoJSON for the US map
+      .attr("height", mapHeight * 1.1);
+      
+    // Convert TopoJSON to GeoJSON for the US map
     function topojsonFeature(topology: any, object: any): any {
       const arcs = topology.arcs;
       const transform = topology.transform;
@@ -208,8 +213,10 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .attr("x", mapWidth / 2)
             .attr("y", mapHeight / 2)
             .attr("text-anchor", "middle")
-            .text("No occurrence data for this date");          return;
+            .text("No occurrence data for this date");
+          return;
         }
+        
         // Size hexbins proportionally to the map
         const hexRadius = Math.min(mapWidth, mapHeight) * 0.01;
         
@@ -219,17 +226,42 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
           .y((d: CustomPoint) => d[1])
           .extent([[0, 0], [mapWidth, mapHeight]])
           .radius(hexRadius);
+          
+        // Important: Make sure each point is properly projected from lat/long to screen coordinates
         const points: CustomPoint[] = [];
         filteredOccurrences.forEach(d => {
+          // Check for valid coordinates first
+          if (isNaN(d.longitude) || isNaN(d.latitude)) {
+            console.warn('Invalid coordinates:', d);
+            return;
+          }
+          
+          // Project coordinates using Albers USA projection
           const coords = projection([d.longitude, d.latitude]);
-          if (coords) {
+          
+          // Only include points that are within the projection bounds
+          if (coords && !isNaN(coords[0]) && !isNaN(coords[1])) {
             const point = [coords[0], coords[1]] as CustomPoint;
-            point.count = d.count;
+            point.count = d.count || 1; // Default to 1 if count is missing
             point.temperature = d.temperature;
             point.precipitation = d.precipitation;
             points.push(point);
           }
         });
+        
+        // Debug output to verify points
+        //console.log(`Projected ${points.length} out of ${filteredOccurrences.length} points`);
+        
+        // Continue only if we have points
+        if (points.length === 0) {
+          svg.append("text")
+            .attr("x", mapWidth / 2)
+            .attr("y", mapHeight / 2)
+            .attr("text-anchor", "middle")
+            .text("No points could be projected for this date");
+          return;
+        }
+        
         const bins = hexbinGenerator(points);
         
         // Sum bird counts in each hexbin
@@ -352,7 +384,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
           .text("Error rendering overlays");
       }
     }
-  }, [mapWidth, mapHeight, filteredOccurrences, showClimate]);    return (
+  }, [mapWidth, mapHeight, filteredOccurrences, showClimate, currentDate]);    return (
     <div className="w-full h-full overflow-hidden" ref={containerRef}>
       <svg 
         ref={svgRef}
