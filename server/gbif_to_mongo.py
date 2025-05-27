@@ -6,6 +6,9 @@ import time
 
 GBIF_API = "https://api.gbif.org/v1"
 
+# Reminder to choose which "scientific_names" you want loaded
+# this code only loads JAN 2023
+delete this line, it will throw an error when running. Chose which species 
 
 scientific_names = [
     "Turdus migratorius",
