@@ -20,7 +20,7 @@ export default function App() {
   const [seasonalData, setSeasonalData] = useState<SeasonalDataPoint[]>([]);
   const [showClimate, setShowClimate] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(true);
-    // Timeline slider configuration
+  // Timeline slider configuration
   const [timeRange, setTimeRange] = useState<TimeRange>({
     startYear: 2020,
     startMonth: 2,
@@ -31,7 +31,8 @@ export default function App() {
   });
   
   const [currentDate, setCurrentDate] = useState<string>("2023-06-01");
-    // Load available bird species when app starts
+  
+  // Load available bird species when app starts
   useEffect(() => {
     setLoading(true);
     fetch('http://localhost:8000/species_list')
@@ -57,18 +58,26 @@ export default function App() {
         setLoading(false);
       });
   }, []);
-    // Load all data when user selects a different bird species
+  
+  // Load all data when user selects a different bird species
   useEffect(() => {
     if (!selectedSpecies) return;
     
+    // Get the scientific name for the selected species
+    const scientificName = scientificNames[selectedSpecies];
+    if (!scientificName) {
+      console.error(`No scientific name found for species: ${selectedSpecies}`);
+      return;
+    }
+    
     setLoading(true);
     
-    // Get bird sighting data
-    fetch(`http://localhost:8000/occurrences/${selectedSpecies}`)
+    // Get bird sighting data using scientific name
+    fetch(`http://localhost:8000/occurrences/${encodeURIComponent(scientificName)}`)
       .then(res => res.json())
       .then((data: SpeciesOccurrence) => {
         setOccurrenceData(data.occurrences);
-          // Set timeline to match available data
+        // Set timeline to match available data
         if (data.occurrences.length > 0) {
           const dates = data.occurrences.map(d => new Date(d.date));
           const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
@@ -85,8 +94,9 @@ export default function App() {
         }
       })
       .catch(error => console.error("Error fetching occurrence data:", error));
-      // Get future predictions
-    fetch(`http://localhost:8000/forecasts/${selectedSpecies}`)
+      
+    // Get future predictions using scientific name
+    fetch(`http://localhost:8000/forecasts/${encodeURIComponent(scientificName)}`)
       .then(res => res.json())
       .then((data: SpeciesForecast) => {
         setForecastData(data.forecasts);
@@ -109,8 +119,8 @@ export default function App() {
       })
       .catch(error => console.error("Error fetching forecast data:", error));
     
-    // Fetch seasonal data
-    fetch(`http://localhost:8000/seasonal/${selectedSpecies}`)
+    // Fetch seasonal data using scientific name
+    fetch(`http://localhost:8000/seasonal/${encodeURIComponent(scientificName)}`)
       .then(res => res.json())
       .then((data: SpeciesSeasonalData) => {
         setSeasonalData(data.seasonal_data);
@@ -119,8 +129,9 @@ export default function App() {
       .finally(() => {
         setLoading(false);
       });
-  }, [selectedSpecies]);
-    // Update visualizations when user changes the date
+  }, [selectedSpecies, scientificNames]); // Added scientificNames to dependency array
+  
+  // Update visualizations when user changes the date
   const handleTimeChange = (year: number, month: number) => {
     setTimeRange(prev => ({
       ...prev,
