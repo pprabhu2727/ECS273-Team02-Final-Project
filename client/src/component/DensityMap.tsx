@@ -23,14 +23,17 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [mapWidth, setMapWidth] = useState(0);
-  const [mapHeight, setMapHeight] = useState(0);  // Show bird sightings for the selected month/year
+  const [mapHeight, setMapHeight] = useState(0);
+  
+  // Show bird sightings for the selected month/year
   const filteredOccurrences = occurrences.filter(d => {
     const occDate = new Date(d.date);
     const currDate = new Date(currentDate);
     return occDate.getFullYear() === currDate.getFullYear() && 
            occDate.getMonth() === currDate.getMonth();
   });
-    useEffect(() => {
+  
+  useEffect(() => {
     if (!containerRef.current || !svgRef.current) return;
     
     // Make the map responsive to container size changes
@@ -70,6 +73,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove(); // Clear previous rendering
+    
     svg.append("defs")
       .append("clipPath")
       .attr("id", "map-clip")
@@ -77,7 +81,9 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
       .attr("x", -mapWidth * 0.05)
       .attr("y", -mapHeight * 0.05)
       .attr("width", mapWidth * 1.1)
-      .attr("height", mapHeight * 1.1);    // Convert TopoJSON to GeoJSON for the US map
+      .attr("height", mapHeight * 1.1);
+      
+    // Convert TopoJSON to GeoJSON for the US map
     function topojsonFeature(topology: any, object: any): any {
       const arcs = topology.arcs;
       const transform = topology.transform;
@@ -89,6 +95,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
         const translate = transform.translate;
         return [point[0] * scale[0] + translate[0], point[1] * scale[1] + translate[1]];
       }
+      
       function decodeArc(arcIdx: number): number[][] {
         let arc = arcs[arcIdx < 0 ? ~arcIdx : arcIdx];
         let points: number[][] = [];
@@ -101,9 +108,11 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
         if (arcIdx < 0) points.reverse();
         return points;
       }
+      
       function arcsToCoords(arcsArr: any[]): number[][][] {
         return arcsArr.map((ring: any) => ring.flatMap((arcIdx: number) => decodeArc(arcIdx)));
       }
+      
       if (object.type === 'GeometryCollection') {
         return {
           type: 'FeatureCollection',
@@ -134,7 +143,8 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
     // Fetch and render the US map background
     fetch('/src/assets/counties-albers-10m.json')
       .then(res => res.json())
-      .then(us => {        // Extract nation and state boundaries
+      .then(us => {
+        // Extract nation and state boundaries
         const nation = topojsonFeature(us, us.objects.nation);
         const states = topojsonFeature(us, us.objects.states);
         
@@ -177,6 +187,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .attr('stroke', '#bbb')
             .attr('stroke-width', 1);
         }
+        
         // Draw state boundaries
         if (states && (states.type === 'FeatureCollection' || states.type === 'Feature')) {
           svg.append('g')
@@ -189,6 +200,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .attr('stroke', '#888')
             .attr('stroke-width', 0.7);
         }
+        
         // Now render overlays as before, but after the map background
         renderOverlays(svg, projection);
       })
@@ -199,7 +211,9 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
           .attr("y", mapHeight / 2)
           .attr("text-anchor", "middle")
           .text("Error loading map background");
-      });    // Render bird density hexbin visualization on top of the map
+      });
+      
+    // Render temperature heatmap and bird density hexbin visualization
     function renderOverlays(svg: d3.Selection<SVGSVGElement, unknown, null, undefined>, projection: d3.GeoProjection) {
       try {
         // Check for data before attempting visualization
@@ -208,8 +222,10 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .attr("x", mapWidth / 2)
             .attr("y", mapHeight / 2)
             .attr("text-anchor", "middle")
-            .text("No occurrence data for this date");          return;
+            .text("No occurrence data for this date");
+          return;
         }
+        
         // Size hexbins proportionally to the map
         const hexRadius = Math.min(mapWidth, mapHeight) * 0.01;
         
@@ -219,6 +235,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
           .y((d: CustomPoint) => d[1])
           .extent([[0, 0], [mapWidth, mapHeight]])
           .radius(hexRadius);
+          
         const points: CustomPoint[] = [];
         filteredOccurrences.forEach(d => {
           const coords = projection([d.longitude, d.latitude]);
@@ -230,11 +247,45 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             points.push(point);
           }
         });
+        
         const bins = hexbinGenerator(points);
+        
+        // Calculate temperature extent for color scale
+        const tempExtent = d3.extent(filteredOccurrences, d => d.temperature) as [number, number];
+        
+        // Create temperature heatmap layer if showClimate is true
+        if (showClimate && tempExtent[0] != null && tempExtent[1] != null && !isNaN(tempExtent[0]) && !isNaN(tempExtent[1])) {
+          const tempColorScale = d3.scaleSequential(d3.interpolatePlasma)
+            .domain([tempExtent[0], tempExtent[1]]);
+          
+          // Create temperature hexbin layer
+          const tempGroup = svg.append("g")
+            .attr("class", "temperature-layer")
+            .attr("opacity", 0.6)
+            .attr("clip-path", "url(#map-clip)");
+          
+          // Calculate average temperature for each hexbin
+          const tempBins = bins.map(bin => {
+            const avgTemp = bin.length > 0 ? d3.mean(bin, (d: CustomPoint) => d.temperature) : null;
+            return {
+              ...bin,
+              avgTemperature: avgTemp
+            };
+          });
+          
+          tempGroup.selectAll("path")
+            .data(tempBins.filter(d => d.avgTemperature != null))
+            .join("path")
+              .attr("transform", (d: any) => `translate(${d.x},${d.y})`)
+              .attr("d", hexbinGenerator.hexagon())
+              .attr("fill", (d: any) => tempColorScale(d.avgTemperature))
+              .attr("stroke", "none");
+        }
         
         // Sum bird counts in each hexbin
         const getBinValue = (bin: Array<CustomPoint>) => d3.sum(bin, (d: CustomPoint) => d.count);
         const validBins = bins.filter(bin => getBinValue(bin) > 0);
+        
         if (!validBins.length) {
           svg.append("text")
             .attr("x", mapWidth / 2)
@@ -243,6 +294,7 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .text("No occurrence data for this date");
           return;
         }
+        
         const countExtent = d3.extent(validBins, getBinValue) as [number | undefined, number | undefined];
         if (countExtent[1] == null || isNaN(countExtent[1]) || countExtent[1] <= 0) {
           svg.append("text")
@@ -252,20 +304,25 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
             .text("No occurrence data for this date");
           return;
         }
+        
         const colorScale = d3.scaleSequential(d3.interpolateYlOrRd)
           .domain([0, countExtent[1]]);
+        
         const radiusScale = d3.scaleSqrt()
           .domain([0, countExtent[1]])
           .range([0, hexbinGenerator.radius() * Math.SQRT2]);
+        
         const hexGroup = svg.append("g")
+          .attr("class", "bird-density-layer")
           .attr("clip-path", "url(#map-clip)");
+        
         hexGroup.selectAll("path")
           .data(validBins)
           .join("path")
             .attr("transform", (d: any) => `translate(${d.x},${d.y})`)
             .attr("d", (d: any) => hexbinGenerator.hexagon(radiusScale(getBinValue(d))))
             .attr("fill", (d: any) => colorScale(getBinValue(d)))
-            .attr("stroke", (d: any) => d3.lab(colorScale(getBinValue(d))).toString())
+            .attr("stroke", (d: any) => d3.lab(colorScale(getBinValue(d))).darker(0.5).toString())
             .attr("stroke-width", 0.5)
           .append("title")
             .text((d: any) => {
@@ -273,73 +330,107 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
               const avgTemp = d3.mean(d as CustomPoint[], (p: CustomPoint) => p.temperature);
               const avgPrecip = d3.mean(d as CustomPoint[], (p: CustomPoint) => p.precipitation);
               return `Total birds: ${totalCount.toFixed(0)}\nAvg temperature: ${avgTemp?.toFixed(1)}°C\nAvg precipitation: ${avgPrecip?.toFixed(1)}mm`;
-            });        // Show temperature gradient overlay when enabled
-        if (showClimate) {
-          const tempExtent = d3.extent(filteredOccurrences, d => d.temperature) as [number, number];
-          if (tempExtent[0] != null && tempExtent[1] != null && !isNaN(tempExtent[0]) && !isNaN(tempExtent[1]) && tempExtent[0] !== tempExtent[1]) {
-            const tempColorScale = d3.scaleSequential(d3.interpolateRdBu)
-              .domain([tempExtent[1], tempExtent[0]]);
-            const legendHeight = 10;
-            const legendWidth = 150;
-            const legendX = mapWidth - legendWidth - 20;
-            const legendY = 20;
-            const defs = svg.append("defs");
-            const gradient = defs.append("linearGradient")
-              .attr("id", "temp-gradient")
-              .attr("x1", "0%")
-              .attr("x2", "100%")
-              .attr("y1", "0%")
-              .attr("y2", "0%");
+            });
+            
+        // Add legends
+        const legendGroup = svg.append("g").attr("class", "legends");
+        
+        // Temperature legend when showClimate is true
+        if (showClimate && tempExtent[0] != null && tempExtent[1] != null) {
+          const tempColorScale = d3.scaleSequential(d3.interpolatePlasma)
+            .domain([tempExtent[0], tempExtent[1]]);
+            
+          const legendHeight = 10;
+          const legendWidth = 150;
+          const legendX = mapWidth - legendWidth - 20;
+          const legendY = 20;
+          
+          const defs = svg.select("defs");
+          const gradient = defs.append("linearGradient")
+            .attr("id", "temp-gradient")
+            .attr("x1", "0%")
+            .attr("x2", "100%")
+            .attr("y1", "0%")
+            .attr("y2", "0%");
+            
+          // Add multiple stops for smooth gradient
+          const nStops = 10;
+          for (let i = 0; i <= nStops; i++) {
+            const t = i / nStops;
+            const temp = tempExtent[0] + t * (tempExtent[1] - tempExtent[0]);
             gradient.append("stop")
-              .attr("offset", "0%")
-              .attr("stop-color", tempColorScale(tempExtent[0]));
-            gradient.append("stop")
-              .attr("offset", "100%")
-              .attr("stop-color", tempColorScale(tempExtent[1]));
-            svg.append("rect")
-              .attr("x", legendX)
-              .attr("y", legendY)
-              .attr("width", legendWidth)
-              .attr("height", legendHeight)
-              .style("fill", "url(#temp-gradient)");
-            svg.append("text")
-              .attr("x", legendX)
+              .attr("offset", `${t * 100}%`)
+              .attr("stop-color", tempColorScale(temp));
           }
-          // Add hexbin density legend
-          const densityLegend = svg.append("g")
-            .attr("transform", `translate(20, 20)`);
-          densityLegend.append("text")
-            .attr("x", 0)
-            .attr("y", -5)
+          
+          const tempLegend = legendGroup.append("g")
+            .attr("class", "temp-legend");
+            
+          tempLegend.append("rect")
+            .attr("x", legendX)
+            .attr("y", legendY)
+            .attr("width", legendWidth)
+            .attr("height", legendHeight)
+            .style("fill", "url(#temp-gradient)")
+            .style("stroke", "#333")
+            .style("stroke-width", 0.5);
+            
+          tempLegend.append("text")
+            .attr("x", legendX)
+            .attr("y", legendY - 5)
+            .attr("font-size", "12px")
+            .attr("font-weight", "bold")
+            .text("Temperature (°C)");
+            
+          tempLegend.append("text")
+            .attr("x", legendX)
+            .attr("y", legendY + legendHeight + 12)
             .attr("font-size", "10px")
-            .text("Bird Count");
-          // Create legend items
-          const legendValues = [1, 10, 50, 100, countExtent[1] ? Math.round(countExtent[1] / 2) : 0, countExtent[1] ? Math.round(countExtent[1]) : 0];
-          const uniqueLegendValues = Array.from(new Set(legendValues))
-            .filter(v => v > 0 && v <= (countExtent[1] ?? 0))
-            .sort((a, b) => a - b);
-          uniqueLegendValues.forEach((value, i) => {
-            const hexSize = radiusScale(value);
-            densityLegend.append("path")
-              .attr("transform", `translate(${hexSize}, ${i * 25 + 10})`)
-              .attr("d", hexbinGenerator.hexagon(hexSize))
-              .attr("fill", colorScale(value))
-              .attr("stroke", d3.lab(colorScale(value)).toString())
-              .attr("stroke-width", 0.5);
-            densityLegend.append("text")
-              .attr("x", hexSize * 2 + 5)
-              .attr("y", i * 25 + 10 + 5)
-              .attr("font-size", "10px")
-              .attr("alignment-baseline", "middle")
-              .text(value.toString());
-          });
-        } else {
-          svg.append("text")
-            .attr("x", mapWidth / 2)
-            .attr("y", mapHeight / 2)
-            .attr("text-anchor", "middle")
-            .text("No occurrence data for this date");
+            .text(`${tempExtent[0].toFixed(1)}°C`);
+            
+          tempLegend.append("text")
+            .attr("x", legendX + legendWidth)
+            .attr("y", legendY + legendHeight + 12)
+            .attr("font-size", "10px")
+            .attr("text-anchor", "end")
+            .text(`${tempExtent[1].toFixed(1)}°C`);
         }
+        
+        // Bird density legend
+        const densityLegend = legendGroup.append("g")
+          .attr("class", "density-legend")
+          .attr("transform", `translate(20, 20)`);
+          
+        densityLegend.append("text")
+          .attr("x", 0)
+          .attr("y", -5)
+          .attr("font-size", "12px")
+          .attr("font-weight", "bold")
+          .text("Bird Count");
+        
+        // Create legend items
+        const legendValues = [1, 10, 50, 100, countExtent[1] ? Math.round(countExtent[1] / 2) : 0, countExtent[1] ? Math.round(countExtent[1]) : 0];
+        const uniqueLegendValues = Array.from(new Set(legendValues))
+          .filter(v => v > 0 && v <= (countExtent[1] ?? 0))
+          .sort((a, b) => a - b);
+          
+        uniqueLegendValues.forEach((value, i) => {
+          const hexSize = radiusScale(value);
+          densityLegend.append("path")
+            .attr("transform", `translate(${hexSize}, ${i * 25 + 15})`)
+            .attr("d", hexbinGenerator.hexagon(hexSize))
+            .attr("fill", colorScale(value))
+            .attr("stroke", d3.lab(colorScale(value)).darker(0.5).toString())
+            .attr("stroke-width", 0.5);
+            
+          densityLegend.append("text")
+            .attr("x", hexSize * 2 + 5)
+            .attr("y", i * 25 + 15 + 5)
+            .attr("font-size", "10px")
+            .attr("alignment-baseline", "middle")
+            .text(value.toString());
+        });
+        
       } catch (err) {
         console.error('Error rendering overlays:', err);
         svg.append("text")
@@ -349,7 +440,9 @@ export default function DensityMap({ occurrences, currentDate, showClimate }: De
           .text("Error rendering overlays");
       }
     }
-  }, [mapWidth, mapHeight, filteredOccurrences, showClimate]);    return (
+  }, [mapWidth, mapHeight, filteredOccurrences, showClimate]);
+  
+  return (
     <div className="w-full h-full overflow-hidden" ref={containerRef}>
       <svg 
         ref={svgRef}
