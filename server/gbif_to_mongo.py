@@ -3,13 +3,16 @@ import aiohttp
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import time
+from pydantic import BaseModel
+from bson import ObjectId
+from typing import List
 
 GBIF_API = "https://api.gbif.org/v1"
+
 
 # Reminder to choose which "scientific_names" you want loaded
 # this code only loads JAN 2023
 delete this line, it will throw an error when running. Chose which species 
-
 scientific_names = [
     "Turdus migratorius",
     # "Cardinalis cardinalis",
@@ -23,9 +26,42 @@ scientific_names = [
     # "Sialia sialis"
 ]
 
+# I used llm to help make this code as quick as possible while also avoid crashing/fail bc of hitting rate limit
 # MongoDB connection with optimizations
 client = AsyncIOMotorClient("mongodb://localhost:27017")
 db = client.bird_tracking
+
+# Pydantic models matching your structure
+class PyObjectId(ObjectId):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not ObjectId.is_valid(v):
+            raise ValueError("Invalid objectid")
+        return ObjectId(v)
+
+class OccurrencePoint(BaseModel):
+    """
+    Model for a single bird occurrence point
+    """
+    date: str
+    latitude: float
+    longitude: float
+    count: int
+    temperature: float  # Temperature data from PRISM - placeholder for now
+    precipitation: float  # Precipitation data from PRISM - placeholder for now
+
+class SpeciesOccurrenceModel(BaseModel):
+    """
+    Model for bird species occurrence data
+    """
+    _id: PyObjectId
+    species: str
+    scientific_name: str
+    occurrences: List[OccurrencePoint]
 
 async def fetch_gbif_occurrences(session, scientific_name, offset=0, limit=1000):
     """Fetch occurrences from GBIF API with pagination"""
@@ -66,15 +102,15 @@ async def fetch_gbif_occurrences(session, scientific_name, offset=0, limit=1000)
     return None
 
 async def process_occurrences(occurrences_data):
-    """Process and format occurrence data for MongoDB - optimized version"""
-    records = []
+    """Process and format occurrence data for the new structure"""
+    occurrence_points = []
     
     for occurrence in occurrences_data.get('results', []):
         # Skip if missing essential data
         if not all(key in occurrence for key in ['eventDate', 'decimalLatitude', 'decimalLongitude']):
             continue
             
-        # Optimized date parsing
+        # Optimized date parsing - convert to string format
         event_date = occurrence['eventDate']
         try:
             if 'T' in event_date:
@@ -84,43 +120,61 @@ async def process_occurrences(occurrences_data):
                 sighting_date = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
             else:
                 sighting_date = datetime.strptime(event_date, '%Y-%m-%d')
+            
+            # Convert to string for storage
+            date_str = sighting_date.isoformat()
         except (ValueError, TypeError):
             continue  # Skip invalid dates
         
-        # Use dictionary comprehension for better performance
-        record = {
-            "date": sighting_date,
-            "latitude": float(occurrence['decimalLatitude']),
-            "longitude": float(occurrence['decimalLongitude']),
-            "count": occurrence.get('individualCount', 1),
-            "species": occurrence.get('species', ''),
-            "scientificName": occurrence.get('scientificName', ''),
-            "basisOfRecord": occurrence.get('basisOfRecord', ''),
-            "countryCode": occurrence.get('countryCode', '')
-        }
-        records.append(record)
+        # Create OccurrencePoint
+        occurrence_point = OccurrencePoint(
+            date=date_str,
+            latitude=float(occurrence['decimalLatitude']),
+            longitude=float(occurrence['decimalLongitude']),
+            count=occurrence.get('individualCount', 1),
+            temperature=0.0,  # Placeholder - will be filled by PRISM data later
+            precipitation=0.0  # Placeholder - will be filled by PRISM data later
+        )
+        occurrence_points.append(occurrence_point)
     
-    return records
+    return occurrence_points
 
-async def insert_to_mongodb_bulk(records, batch_size=1000):
-    """Bulk insert records into MongoDB with larger batches"""
-    if not records:
+async def upsert_species_occurrences(scientific_name, species_name, occurrence_points):
+    """Upsert species occurrence data using the new structure"""
+    if not occurrence_points:
         return 0
         
     collection = db.species_occurrences
     
-    # Process in larger batches for better performance
-    total_inserted = 0
-    for i in range(0, len(records), batch_size):
-        batch = records[i:i + batch_size]
-        try:
-            result = await collection.insert_many(batch, ordered=False)
-            total_inserted += len(result.inserted_ids)
-            print(f"✓ Inserted batch of {len(result.inserted_ids)} records")
-        except Exception as e:
-            print(f"Error inserting batch: {e}")
+    # Check if species already exists
+    existing_doc = await collection.find_one({"scientific_name": scientific_name})
     
-    return total_inserted
+    if existing_doc:
+        # Update existing document by extending occurrences array
+        result = await collection.update_one(
+            {"scientific_name": scientific_name},
+            {
+                "$push": {
+                    "occurrences": {
+                        "$each": [point.dict() for point in occurrence_points]
+                    }
+                }
+            }
+        )
+        print(f"✓ Updated existing species {scientific_name} with {len(occurrence_points)} new occurrences")
+        return len(occurrence_points)
+    else:
+        # Create new document
+        species_doc = SpeciesOccurrenceModel(
+            _id=PyObjectId(ObjectId()),
+            species=species_name,
+            scientific_name=scientific_name,
+            occurrences=occurrence_points
+        )
+        
+        result = await collection.insert_one(species_doc.dict())
+        print(f"✓ Created new species document for {scientific_name} with {len(occurrence_points)} occurrences")
+        return len(occurrence_points)
 
 async def fetch_concurrent_batches(session, scientific_name, max_concurrent=5):
     """Fetch multiple pages concurrently for faster data retrieval"""
@@ -206,21 +260,28 @@ async def main():
             species_start_time = time.time()
             
             # Fetch all occurrences concurrently
-            all_records = await fetch_concurrent_batches(session, scientific_name)
+            all_occurrence_points = await fetch_concurrent_batches(session, scientific_name)
             
-            # Bulk insert all records
-            if all_records:
-                total_inserted = await insert_to_mongodb_bulk(all_records, batch_size=2000)
+            # Get species common name (you might want to add this logic or hardcode mappings)
+            species_name = scientific_name.split()[-1] if scientific_name else "Unknown"
+            
+            # Upsert species occurrence data in the new structure
+            if all_occurrence_points:
+                total_inserted = await upsert_species_occurrences(
+                    scientific_name, 
+                    species_name, 
+                    all_occurrence_points
+                )
                 
                 species_end_time = time.time()
                 species_duration = species_end_time - species_start_time
                 
                 print(f"🎉 Completed {scientific_name}:")
-                print(f"   📊 {total_inserted} total records inserted")
+                print(f"   📊 {total_inserted} total occurrences processed")
                 print(f"   ⏱️  Time taken: {species_duration:.2f} seconds")
-                print(f"   🚀 Rate: {total_inserted/species_duration:.1f} records/second")
+                print(f"   🚀 Rate: {total_inserted/species_duration:.1f} occurrences/second")
             else:
-                print(f"❌ No records found for {scientific_name}")
+                print(f"❌ No occurrences found for {scientific_name}")
             
             print("-" * 50)
     
@@ -229,3 +290,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
