@@ -48,7 +48,7 @@ async def get_species_occurrences(species_name: str) -> SpeciesOccurrenceModel:
     - species_name: The common name of the bird species
     """
     occurrences_collection = db.get_collection("species_occurrences")
-    occurrences = await occurrences_collection.find_one({"species": species_name})
+    occurrences = await occurrences_collection.find_one({"scientific_name": species_name})
     return occurrences
 
 @app.get("/forecasts/{species_name}", 
