@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+// import { useEffect, useState } from 'react';
 import BoxPlot from './component/BoxPlot';
 import DensityMap from './component/DensityMap';
 import DataTable from './component/DataTable';
+import { useEffect, useState, useRef } from 'react';
+import ForecastingChart from './component/ForecastingChart';
 
 interface OccurrencePoint {
   date: string;
@@ -9,14 +11,68 @@ interface OccurrencePoint {
   longitude: number;
 }
 
+// Types
+interface ForecastPoint {
+  year: number;
+  month: number;
+  count_prediction: number;  // Updated field name
+  range_north: number;
+  range_south: number;
+  range_east: number;
+  range_west: number;
+  confidence_interval?: {
+    lower: number;
+    upper: number;
+  };
+}
+
+interface SpeciesForecast {
+  species: string;
+  scientific_name: string;
+  forecasts: ForecastPoint[];
+}
+
+interface TimeRange {
+  startYear: number;
+  startMonth: number;
+  endYear: number;
+  endMonth: number;
+  currentYear: number;
+  currentMonth: number;
+}
+
 export default function App() {
   const [speciesList, setSpeciesList] = useState<string[]>([]);
   const [scientificNames, setScientificNames] = useState<Record<string, string>>({});
   const [selectedSpecies, setSelectedSpecies] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('2023-01-01');
+
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [recentData, setRecentData] = useState<OccurrencePoint[]>([]);
 
+  const [heatmapUrl, setHeatmapUrl] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [scale, setScale] = useState(1);
+
+
+    // Forecasting data
+  const [forecastData, setForecastData] = useState<ForecastPoint[]>([]);
+  const [timeRange, setTimeRange] = useState<TimeRange>({
+    startYear: 2023,
+    startMonth: 1,
+    endYear: 2025,
+    endMonth: 12,
+    currentYear: 2024,
+    currentMonth: 1
+  });
+
+  const zoomRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  
   useEffect(() => {
     fetch('http://localhost:8000/species_list')
       .then(res => res.json())
@@ -40,6 +96,84 @@ export default function App() {
         .catch(err => console.error("Error fetching recent occurrences:", err));
     }
   }, [selectedSpecies, scientificNames]);
+
+
+// Load forecast data when species changes
+useEffect(() => {
+  if (!selectedSpecies) return;
+  
+  console.log(`Fetching forecasts for: ${selectedSpecies}`);
+  
+  fetch(`http://localhost:8000/forecasts/${encodeURIComponent(selectedSpecies)}`)
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      return res.json();
+    })
+    .then((data: SpeciesForecast) => {
+      console.log(`Received ${data.forecasts.length} forecast points for ${data.species}`);
+      setForecastData(data.forecasts);
+      
+      // Update timeline to include all data points
+      if (data.forecasts.length > 0) {
+        const minDate = data.forecasts.reduce((min, f) => {
+          if (f.year < min.year || (f.year === min.year && f.month < min.month)) {
+            return f;
+          }
+          return min;
+        });
+        
+        const maxDate = data.forecasts.reduce((max, f) => {
+          if (f.year > max.year || (f.year === max.year && f.month > max.month)) {
+            return f;
+          }
+          return max;
+        });
+        
+        setTimeRange(prev => ({
+          ...prev,
+          startYear: minDate.year,
+          startMonth: minDate.month,
+          endYear: maxDate.year,
+          endMonth: maxDate.month,
+        }));
+      }
+    })
+    .catch(error => {
+      console.error("Error fetching forecast data:", error);
+      setForecastData([]); // Clear data on error
+    });
+}, [selectedSpecies]);
+
+useEffect(() => {
+  if (!selectedSpecies || !currentDate) return;
+
+  const sciName = scientificNames[selectedSpecies];
+  if (!sciName) {
+    console.warn(`No scientific name mapping for selected species: ${selectedSpecies}`);
+    return;
+  }
+
+  const encoded = encodeURIComponent(sciName);
+  setLoading(true);
+
+  fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${encoded}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data?.url) {
+        setHeatmapUrl(`http://localhost:8000${data.url}`);
+      }
+    })
+    .catch(err => console.error("Error generating heatmap:", err))
+    .finally(() => {
+      setLoading(false);
+      setScale(1);
+      setOffset({ x: 0, y: 0 });
+    });
+}, [selectedSpecies, currentDate]);
+
+
 
   const dateObj = new Date(currentDate);
   const year = dateObj.getFullYear();
@@ -133,7 +267,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
+          {/* <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
             <h3 className="text-lg font-semibold text-gray-800">Species Information</h3>
             <div className="flex-grow flex flex-col justify-start px-4 pb-4">
               {selectedSpecies && (
@@ -141,6 +275,24 @@ export default function App() {
                   <p className="text-gray-800"><strong>Common Name:</strong> {selectedSpecies}</p>
                   <p className="text-gray-800"><strong>Scientific Name:</strong> {scientificNames[selectedSpecies] || 'N/A'}</p>
                   <p className="text-gray-800"><strong>Selected Date:</strong> {currentDate}</p>
+                </div>
+              )}
+            </div>
+          </div>
+ */}
+
+        <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
+            <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
+            <div className="flex-grow overflow-hidden p-4">
+              {forecastData.length > 0 ? (
+                <ForecastingChart 
+                  data={forecastData}
+                  timeRange={timeRange}
+                  currentDate={currentDate}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-600">Loading forecast data...</p>
                 </div>
               )}
             </div>
