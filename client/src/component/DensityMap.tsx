@@ -15,56 +15,66 @@ export default function DensityMap({ currentDate, selectedSpecies, scientificNam
 
     const scientificName = scientificNames[selectedSpecies];
     const svg = d3.select(svgRef.current);
-    
-    // Clear everything including zoom behavior
     svg.selectAll("*").remove();
-    svg.on(".zoom", null); // Remove any existing zoom handlers
-    
-    let cancelled = false; // Flag to prevent state updates if component unmounts
+    svg.on(".zoom", null);
 
-    fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${scientificName}`)
-      .then(res => {
-        if (cancelled) return null;
-        return res.json();
-      })
-      .then(data => {
-        if (cancelled || !data) return;
-        
-        const imageUrl = `http://localhost:8000${data.url}`;
-        const g = svg.append("g");
+    let cancelled = false;
 
-        // Use foreignObject + img for better compatibility
-        g.append("foreignObject")
-          .attr("x", 0)
-          .attr("y", 0)
-          .attr("width", 800)
-          .attr("height", 500)
-          .append("xhtml:img")
-          .attr("src", imageUrl)
-          .style("width", "800px")
-          .style("height", "400px");
+    const safeName = scientificName.replace(/ /g, "_");
+    const staticImageUrl = `http://localhost:8000/static/${safeName}_${currentDate}.png`;
 
-        const zoom = d3.zoom<SVGSVGElement, unknown>()
-          .scaleExtent([1, 12])
-          .on("zoom", (event) => {
-            g.attr("transform", event.transform);
-          });
+    const checkAndRender = async () => {
+      try {
+        const headRes = await fetch(staticImageUrl, { method: "HEAD" });
 
-        svg.call(zoom);
-      })
-      .catch(err => {
-        if (!cancelled) {
-          console.error("Failed to load image:", err);
+        if (cancelled) return;
+
+        if (headRes.ok) {
+          renderImage(staticImageUrl);
+        } else {
+          const apiRes = await fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${scientificName}`);
+          if (!apiRes.ok) return;
+
+          const data = await apiRes.json();
+          if (!data?.url) return;
+
+          const fallbackUrl = `http://localhost:8000${data.url}`;
+          renderImage(fallbackUrl);
         }
-      });
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Error checking or rendering heatmap:", err);
+        }
+      }
+    };
 
-    // Cleanup function
+    const renderImage = (url: string) => {
+      const g = svg.append("g");
+
+      g.append("foreignObject")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", 800)
+        .attr("height", 500)
+        .append("xhtml:img")
+        .attr("src", url)
+        .style("width", "800px")
+        .style("height", "400px");
+
+      const zoom = d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([1, 12])
+        .on("zoom", (event) => {
+          g.attr("transform", event.transform);
+        });
+
+      svg.call(zoom);
+    };
+
+    checkAndRender();
+
     return () => {
       cancelled = true;
-      if (svgRef.current) {
-        const svg = d3.select(svgRef.current);
-        svg.on(".zoom", null); // Remove zoom handlers
-      }
+      svg.on(".zoom", null);
     };
   }, [currentDate, selectedSpecies, scientificNames]);
 

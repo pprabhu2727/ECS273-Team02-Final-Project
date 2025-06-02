@@ -1,13 +1,23 @@
 import os
+import threading
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient
 from datetime import datetime, timedelta
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import matplotlib.patches as mpatches
 
 def generate_and_save_heatmap(date_str: str, species: str) -> str:
+    # Step 1: generate the requested image first
+    output_path = _generate_if_missing(date_str, species)
+
+    # Step 2: in background, pre-generate rest of the month
+    threading.Thread(target=_pre_generate_month_images, args=(date_str, species), daemon=True).start()
+
+    return output_path
+
+def _generate_if_missing(date_str: str, species: str) -> str:
     DATE = datetime.strptime(date_str, "%Y-%m-%d")
     NEXT_DATE = DATE + timedelta(days=1)
 
@@ -16,14 +26,20 @@ def generate_and_save_heatmap(date_str: str, species: str) -> str:
     BIL_FILENAME = f"{date_str}.bil"
     BIL_FILE = os.path.join(BIL_FOLDER, BIL_FILENAME)
 
+    static_dir = os.path.join(SCRIPT_DIR, "static")
+    os.makedirs(static_dir, exist_ok=True)
+    safe_species_name = species.replace(" ", "_")
+    output_file = os.path.join(static_dir, f"{safe_species_name}_{date_str}.png")
+
+    # ✅ Skip if already generated
+    if os.path.exists(output_file):
+        return output_file
+
     # MongoDB connection
     client = MongoClient("mongodb://localhost:27017")
     db = client.bird_tracking
     collection = db.species_occurrences
 
-   
-
-    # Query with exact match (faster with index)
     query = {
         "scientific_name": species,
         "date": {
@@ -101,13 +117,27 @@ def generate_and_save_heatmap(date_str: str, species: str) -> str:
 
     fig.subplots_adjust(left=0.04, right=0.98, top=0.97, bottom=0.06)
 
-    # Save the plot
-    static_dir = os.path.join(SCRIPT_DIR, "static")
-    os.makedirs(static_dir, exist_ok=True)
-    safe_species_name = species.replace(" ", "_")
-    output_file = os.path.join(static_dir, f"{safe_species_name}_{date_str}.png")
     plt.savefig(output_file, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
     print(f"🖼️ Heatmap saved to {output_file}")
     return output_file
+
+def _pre_generate_month_images(date_str: str, species: str):
+    try:
+        base_date = datetime.strptime(date_str, "%Y-%m-%d")
+        year, month = base_date.year, base_date.month
+        first_day = datetime(year, month, 1)
+        # Find last day of the month
+        if month == 12:
+            next_month = datetime(year + 1, 1, 1)
+        else:
+            next_month = datetime(year, month + 1, 1)
+        num_days = (next_month - first_day).days
+
+        for day in range(1, num_days + 1):
+            d = datetime(year, month, day).strftime("%Y-%m-%d")
+            _generate_if_missing(d, species)
+
+    except Exception as e:
+        print(f"⚠️ Error during month pre-generation: {e}")
