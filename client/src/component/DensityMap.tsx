@@ -1,117 +1,74 @@
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, CircleMarker, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import * as L from 'leaflet';
-import 'heatmap.js';
-import 'leaflet-heatmap';
+import { useEffect, useRef } from 'react';
+import * as d3 from 'd3';
 
-interface Occurrence {
-  date: string;
-  latitude: number;
-  longitude: number;
-  count: number;
-}
-
-interface ClimateGrid {
-  date: string;
-  resolution: string;
-  origin: [number, number]; // [lon, lat]
-  step: [number, number];   // [lonStep, latStep]
-  nodata: number;
-  grid: (number | null)[][];
-}
-
-interface Props {
-  occurrences: Occurrence[];
+interface DensityMapProps {
   currentDate: string;
-  climate: ClimateGrid;
+  selectedSpecies: string;
+  scientificNames: Record<string, string>;
 }
 
-function HeatLayer({ climate }: { climate: ClimateGrid }) {
-  const map = useMap();
+export default function DensityMap({ currentDate, selectedSpecies, scientificNames }: DensityMapProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
-    if (!climate || !climate.grid) return;
+    if (!svgRef.current || !selectedSpecies || !scientificNames[selectedSpecies]) return;
 
-    const { origin, step, grid, nodata } = climate;
-    const heatmapPoints = [];
+    const scientificName = scientificNames[selectedSpecies];
+    const svg = d3.select(svgRef.current);
+    
+    // Clear everything including zoom behavior
+    svg.selectAll("*").remove();
+    svg.on(".zoom", null); // Remove any existing zoom handlers
+    
+    let cancelled = false; // Flag to prevent state updates if component unmounts
 
-    for (let r = 0; r < grid.length; r++) {
-      for (let c = 0; c < grid[r].length; c++) {
-        const value = grid[r][c];
-        if (value === null || value === nodata) continue;
+    fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${scientificName}`)
+      .then(res => {
+        if (cancelled) return null;
+        return res.json();
+      })
+      .then(data => {
+        if (cancelled || !data) return;
+        
+        const imageUrl = `http://localhost:8000${data.url}`;
+        const g = svg.append("g");
 
-        const lat = origin[1] + r * step[1];
-        const lon = origin[0] + c * step[0];
+        // Use foreignObject + img for better compatibility
+        g.append("foreignObject")
+          .attr("x", 0)
+          .attr("y", 0)
+          .attr("width", 800)
+          .attr("height", 500)
+          .append("xhtml:img")
+          .attr("src", imageUrl)
+          .style("width", "800px")
+          .style("height", "400px");
 
-        if (lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66) {
-          heatmapPoints.push({ lat, lng: lon, value });
+        const zoom = d3.zoom<SVGSVGElement, unknown>()
+          .scaleExtent([1, 12])
+          .on("zoom", (event) => {
+            g.attr("transform", event.transform);
+          });
+
+        svg.call(zoom);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.error("Failed to load image:", err);
         }
-      }
-    }
+      });
 
-    if (heatmapPoints.length === 0) return;
-
-    console.log("Example heatmap point:", heatmapPoints[0]);
-
-    // Auto-pan to heatmap center for debug
-    const centerLat = (Math.min(...heatmapPoints.map(p => p.lat)) + Math.max(...heatmapPoints.map(p => p.lat))) / 2;
-    const centerLng = (Math.min(...heatmapPoints.map(p => p.lng)) + Math.max(...heatmapPoints.map(p => p.lng))) / 2;
-    map.setView([centerLat, centerLng], 6);
-
-    const cfg = {
-      radius: 40,
-      maxOpacity: 1.0,
-      scaleRadius: false,
-      useLocalExtrema: true,
-      latField: 'lat',
-      lngField: 'lng',
-      valueField: 'value',
-      gradient: {
-        0.0: '#0000ff',  // cold - blue
-        0.5: '#00ff00',  // medium - green
-        1.0: '#ff0000'   // hot - red
-      }
-    };
-
-    const heatLayer = (L as any).heatLayer(heatmapPoints, cfg);
-    heatLayer.addTo(map);
-
+    // Cleanup function
     return () => {
-      map.removeLayer(heatLayer);
+      cancelled = true;
+      if (svgRef.current) {
+        const svg = d3.select(svgRef.current);
+        svg.on(".zoom", null); // Remove zoom handlers
+      }
     };
-  }, [climate, map]);
-
-  return null;
-}
-
-export default function ClimateBirdMap({ occurrences, currentDate, climate }: Props) {
-  const filteredPoints = occurrences.filter(o => o.date === currentDate);
+  }, [currentDate, selectedSpecies, scientificNames]);
 
   return (
-    <MapContainer
-      center={[39.5, -98.35]}
-      zoom={5}
-      style={{ height: '100vh', width: '100%' }}
-    >
-      {/* Base tile layer */}
-      <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-
-      {/* Climate heatmap layer */}
-      <HeatLayer climate={climate} />
-
-      {/* Bird sightings */}
-      {filteredPoints.map((pt, idx) => (
-        <CircleMarker
-          key={idx}
-          center={[pt.latitude, pt.longitude]}
-          radius={4}
-          pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.9 }}
-        />
-      ))}
-    </MapContainer>
+    <svg ref={svgRef} width="100%" height="100%" />
   );
 }

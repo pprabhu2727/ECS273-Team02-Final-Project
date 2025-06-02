@@ -1,13 +1,22 @@
 import os
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from data_scheme import SpeciesOccurrenceModel, SpeciesListModel, SpeciesForecastModel, SpeciesSeasonalModel, ClimateGridModel
 import logging
+from fastapi import FastAPI, HTTPException, Query
+from typing import List
+
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from make_plot import generate_and_save_heatmap
-# Set up logging to see detailed errors
+from motor.motor_asyncio import AsyncIOMotorClient
+from data_scheme import (
+    SpeciesOccurrenceModel,
+    SpeciesListModel,
+    SpeciesForecastModel,
+    SpeciesSeasonalModel,
+    ClimateGridModel,
+    SeasonalDataPoint,
+    FlatOccurrenceModel
+)
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -18,7 +27,6 @@ client = AsyncIOMotorClient("mongodb://localhost:27017")
 db = client.bird_tracking
 collection = db.species_occurrences
 climate_collection = db.climate
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,9 +46,8 @@ async def get_species_list():
 async def get_species_occurrences(scientific_name: str):
     print(f"🔍 Looking for: {scientific_name}")
     try:
-        result = await collection.find_one({"species": {"$regex": f"^{scientific_name}$", "$options": "i"}})
+        result = await collection.find_one({"scientific_name": {"$regex": f"^{scientific_name}$", "$options": "i"}})
         if not result:
-            print(f"❌ Not found: {scientific_name}")
             raise HTTPException(status_code=404, detail="Species not found")
         if result.get('_id'):
             result['_id'] = str(result['_id'])
@@ -60,8 +67,6 @@ async def get_heatmap(date: str = Query(...), species: str = Query(...)):
     output_path = generate_and_save_heatmap(date, species)
     return {"url": f"/static/{os.path.basename(output_path)}"}
 
-
-
 @app.get("/forecasts/{species_name}", response_model=SpeciesForecastModel)
 async def get_species_forecasts(species_name: str) -> SpeciesForecastModel:
     forecasts_collection = db.get_collection("species_forecasts")
@@ -74,5 +79,59 @@ async def get_species_seasonal_data(species_name: str) -> SpeciesSeasonalModel:
     seasonal_data = await seasonal_collection.find_one({"species": species_name})
     return seasonal_data
 
+@app.get("/boxplot/{species_name}")
+async def get_boxplot_data(species_name: str):
+    try:
+        pipeline = [
+    {"$match": {"scientific_name": species_name}},
+    {"$project": {"date": 1}},  # 👈 only keep `date`
+    {"$addFields": {
+        "year": {"$year": "$date"},
+        "month": {"$month": "$date"},
+        "day": {"$dayOfMonth": "$date"}
+    }},
+    {"$group": {
+        "_id": {"year": "$year", "month": "$month", "day": "$day"},
+        "dailyCount": {"$sum": 1}
+    }},
+    {"$group": {
+        "_id": "$_id.month",
+        "dailyCounts": {"$push": "$dailyCount"}
+    }},
+    {"$sort": {"_id": 1}}
+]
 
+        results = await collection.aggregate(pipeline).to_list(length=None)
 
+        response = []
+        for entry in results:
+            response.append({
+                "month": entry["_id"],
+                "dailyCounts": entry["dailyCounts"]
+            })
+
+        return JSONResponse(content=response)
+
+    except Exception as e:
+        logger.error(f"Failed to compute boxplot data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to compute boxplot data")
+
+@app.get("/recent_occurrences/{scientific_name}", response_model=List[FlatOccurrenceModel])
+async def get_recent_occurrences(scientific_name: str):
+    try:
+        cursor = collection.find(
+            {"scientific_name": scientific_name}
+        ).sort("date", -1).limit(20)
+
+        results = []
+        async for doc in cursor:
+            if doc.get("_id"):
+                doc["_id"] = str(doc["_id"])
+            results.append(doc)
+
+        return results
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to fetch recent occurrences")

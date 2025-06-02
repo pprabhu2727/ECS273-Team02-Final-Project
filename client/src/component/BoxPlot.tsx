@@ -1,273 +1,298 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { SeasonalDataPoint } from '../types';
 
-interface BoxPlotProps {
-  data: SeasonalDataPoint[];
-  currentYear: number;
+interface BoxPlotDataPoint {
+  month: number;
+  dailyCounts: number[];
 }
 
-export default function BoxPlot({ data, currentYear }: BoxPlotProps) {
+interface BoxPlotStats {
+  month: number;
+  q1: number;
+  median: number;
+  q3: number;
+  min: number;
+  max: number;
+  outliers: number[];
+  iqr: number;
+}
+
+export default function BoxPlot({ scientificName }: { scientificName: string }) {
   const svgRef = useRef<SVGSVGElement>(null);
-  
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [data, setData] = useState<BoxPlotDataPoint[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch real backend data
   useEffect(() => {
-    if (!svgRef.current || !data.length) return;
-    
+    setLoading(true);
+    setError(null);
+    fetch(`http://localhost:8000/boxplot/${encodeURIComponent(scientificName)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(setData)
+      .catch(err => {
+        setError('Failed to load data');
+        console.error("Fetch error:", err);
+      })
+      .finally(() => setLoading(false));
+  }, [scientificName]);
+
+  const calculateStats = (values: number[]): Omit<BoxPlotStats, 'month'> => {
+    const sorted = [...values].sort(d3.ascending);
+    const q1 = d3.quantileSorted(sorted, 0.25) ?? 0;
+    const median = d3.quantileSorted(sorted, 0.5) ?? 0;
+    const q3 = d3.quantileSorted(sorted, 0.75) ?? 0;
+    const iqr = q3 - q1;
+    const lowerFence = q1 - 1.5 * iqr;
+    const upperFence = q3 + 1.5 * iqr;
+    const min = sorted.find(d => d >= lowerFence) ?? sorted[0];
+    const max = [...sorted].reverse().find(d => d <= upperFence) ?? sorted[0];
+    const outliers = sorted.filter(d => d < lowerFence || d > upperFence);
+    return { q1, median, q3, min, max, outliers, iqr };
+  };
+
+  const drawChart = () => {
+    if (!svgRef.current || !containerRef.current || data.length === 0) return;
+
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
-    
-    // Get dimensions
-    const width = svgRef.current.parentElement?.clientWidth || 600;
-    const height = svgRef.current.parentElement?.clientHeight || 300;
-    const margin = { top: 20, right: 30, bottom: 60, left: 50 };
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const width = Math.max(400, containerRect.width);
+    const height = Math.max(300, containerRect.height);
+
+    svg.attr("width", width).attr("height", height);
+
+    const margin = { top: 60, right: 40, bottom: 80, left: 60 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
-      // Get seasonal patterns for the selected year
-    const yearData = data.filter(d => d.year === currentYear);
-    
-    if (!yearData.length) {
-      // Display message when year has no data
-      svg.append("text")
-        .attr("x", width / 2)
-        .attr("y", height / 2)
-        .attr("text-anchor", "middle")
-        .attr("font-size", "14px")
-        .text(`No seasonal data available for ${currentYear}`);
-      return;
-    }
-    
-    // Create scales
+
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    const stats: BoxPlotStats[] = data.map(d => ({
+      month: d.month,
+      ...calculateStats(d.dailyCounts)
+    }));
+
     const xScale = d3.scaleBand()
       .domain(months)
       .range([0, chartWidth])
-      .padding(0.2);
-      const yMax = d3.max(yearData, d => d.max_count) || 0;
+      .padding(0.3);
+
+    const allValues = stats.flatMap(d => [d.min, d.max, ...d.outliers]);
+    const yExtent = d3.extent(allValues) as [number, number];
     const yScale = d3.scaleLinear()
-      .domain([0, yMax * 1.1]) // Add space at the top
-      .range([chartHeight, 0]);
-    
-    // Create chart group
-    const chartGroup = svg
-      .append("g")
+      .domain([Math.max(0, yExtent[0] - 5), yExtent[1] * 1.1])
+      .range([chartHeight, 0])
+      .nice();
+
+    const chartGroup = svg.append("g")
       .attr("transform", `translate(${margin.left}, ${margin.top})`);
-    
-    // Add axes
-    const xAxis = d3.axisBottom(xScale);
-    const yAxis = d3.axisLeft(yScale);
-    
+
+    const yTicks = yScale.ticks(8);
+    chartGroup.selectAll(".grid-line")
+      .data(yTicks)
+      .enter()
+      .append("line")
+      .attr("class", "grid-line")
+      .attr("x1", 0)
+      .attr("x2", chartWidth)
+      .attr("y1", d => yScale(d))
+      .attr("y2", d => yScale(d))
+      .attr("stroke", "#e0e0e0")
+      .attr("stroke-width", 0.5);
+
+    // X-axis with proper text color
     chartGroup.append("g")
-      .attr("class", "x-axis")
       .attr("transform", `translate(0, ${chartHeight})`)
-      .call(xAxis);
-    
+      .call(d3.axisBottom(xScale).tickSizeOuter(0))
+      .selectAll("text")
+      .style("font-size", "12px")
+      .style("fill", "#374151"); // Dark gray color
+
+    // Y-axis with proper text color
     chartGroup.append("g")
-      .attr("class", "y-axis")
-      .call(yAxis);
-    
-    // Add labels
+      .call(d3.axisLeft(yScale).ticks(8))
+      .selectAll("text")
+      .style("font-size", "12px")
+      .style("fill", "#374151"); // Dark gray color
+
+    // Style axis lines
+    chartGroup.selectAll(".domain")
+      .style("stroke", "#6b7280");
+
+    chartGroup.selectAll(".tick line")
+      .style("stroke", "#6b7280");
+
     chartGroup.append("text")
-      .attr("class", "x-axis-label")
-      .attr("text-anchor", "middle")
       .attr("x", chartWidth / 2)
-      .attr("y", chartHeight + margin.bottom - 10)
-      .text("Month");
-    
-    chartGroup.append("text")
-      .attr("class", "y-axis-label")
+      .attr("y", chartHeight + 50)
       .attr("text-anchor", "middle")
+      .style("font-size", "14px")
+      .style("font-weight", "500")
+      .style("fill", "#374151")
+      .text("Month");
+
+    chartGroup.append("text")
       .attr("transform", "rotate(-90)")
       .attr("x", -chartHeight / 2)
-      .attr("y", -margin.left + 15)
-      .text("Bird Count");
-    
-    // Add title
-    chartGroup.append("text")
-      .attr("class", "chart-title")
+      .attr("y", -40)
       .attr("text-anchor", "middle")
+      .style("font-size", "14px")
+      .style("font-weight", "500")
+      .style("fill", "#374151")
+      .text("Daily Count");
+
+    chartGroup.append("text")
       .attr("x", chartWidth / 2)
-      .attr("y", -5)
-      .attr("font-size", "14px")
-      .attr("font-weight", "bold")
-      .text(`Seasonal Variation for ${currentYear}`);
-    
-    // Draw box plots for each month
-    yearData.forEach(d => {
-      const month = months[d.month - 1];
-      const x = xScale(month) || 0;
-      const width = xScale.bandwidth();
-      
-      // Box
-      chartGroup.append("rect")
+      .attr("y", -30)
+      .attr("text-anchor", "middle")
+      .style("font-size", "16px")
+      .style("font-weight", "bold")
+      .style("fill", "#1f2937")
+      .text(`${scientificName || 'Species'} - Monthly Distribution`);
+
+    const tooltip = d3.select("body").append("div")
+      .attr("class", "tooltip")
+      .style("position", "absolute")
+      .style("visibility", "hidden")
+      .style("background", "rgba(0, 0, 0, 0.8)")
+      .style("color", "white")
+      .style("padding", "8px")
+      .style("border-radius", "4px")
+      .style("font-size", "12px")
+      .style("pointer-events", "none")
+      .style("z-index", "1000");
+
+    stats.forEach((d, i) => {
+      const monthName = months[d.month - 1];
+      const x = xScale(monthName) || 0;
+      const boxWidth = xScale.bandwidth();
+      const boxHeight = yScale(d.q1) - yScale(d.q3);
+
+      const group = chartGroup.append("g").attr("class", "box-plot-group");
+
+      const box = group.append("rect")
         .attr("x", x)
-        .attr("y", yScale(d.q3_count))
-        .attr("width", width)
-        .attr("height", yScale(d.q1_count) - yScale(d.q3_count))
-        .attr("fill", "#4285F4")
-        .attr("opacity", 0.7)
-        .attr("stroke", "#000");
-      
-      // Median line
-      chartGroup.append("line")
+        .attr("y", yScale(d.q3))
+        .attr("width", boxWidth)
+        .attr("height", Math.abs(boxHeight))
+        .attr("fill", "#4c9ed9")
+        .attr("stroke", "#2c5aa0")
+        .attr("stroke-width", 1.5)
+        .style("cursor", "pointer");
+
+      group.append("line")
         .attr("x1", x)
-        .attr("x2", x + width)
-        .attr("y1", yScale(d.median_count))
-        .attr("y2", yScale(d.median_count))
-        .attr("stroke", "#000")
+        .attr("x2", x + boxWidth)
+        .attr("y1", yScale(d.median))
+        .attr("y2", yScale(d.median))
+        .attr("stroke", "#1a365d")
         .attr("stroke-width", 2);
-      
-      // Min line
-      chartGroup.append("line")
-        .attr("x1", x + width/2)
-        .attr("x2", x + width/2)
-        .attr("y1", yScale(d.q1_count))
-        .attr("y2", yScale(d.min_count))
-        .attr("stroke", "#000")
+
+      const whiskerWidth = boxWidth * 0.6;
+      const whiskerOffset = (boxWidth - whiskerWidth) / 2;
+
+      group.append("line")
+        .attr("x1", x + boxWidth / 2)
+        .attr("x2", x + boxWidth / 2)
+        .attr("y1", yScale(d.q3))
+        .attr("y2", yScale(d.max))
+        .attr("stroke", "#2c5aa0")
+        .attr("stroke-width", 1.5);
+
+      group.append("line")
+        .attr("x1", x + whiskerOffset)
+        .attr("x2", x + whiskerOffset + whiskerWidth)
+        .attr("y1", yScale(d.max))
+        .attr("y2", yScale(d.max))
+        .attr("stroke", "#2c5aa0")
+        .attr("stroke-width", 1.5);
+
+      group.append("line")
+        .attr("x1", x + boxWidth / 2)
+        .attr("x2", x + boxWidth / 2)
+        .attr("y1", yScale(d.q1))
+        .attr("y2", yScale(d.min))
+        .attr("stroke", "#2c5aa0")
+        .attr("stroke-width", 1.5);
+
+      group.append("line")
+        .attr("x1", x + whiskerOffset)
+        .attr("x2", x + whiskerOffset + whiskerWidth)
+        .attr("y1", yScale(d.min))
+        .attr("y2", yScale(d.min))
+        .attr("stroke", "#2c5aa0")
+        .attr("stroke-width", 1.5);
+
+      group.selectAll(".outlier")
+        .data(d.outliers)
+        .enter()
+        .append("circle")
+        .attr("class", "outlier")
+        .attr("cx", x + boxWidth / 2)
+        .attr("cy", v => yScale(v))
+        .attr("r", 3)
+        .attr("fill", "#e53e3e")
+        .attr("stroke", "#c53030")
         .attr("stroke-width", 1);
-      
-      // Max line
-      chartGroup.append("line")
-        .attr("x1", x + width/2)
-        .attr("x2", x + width/2)
-        .attr("y1", yScale(d.q3_count))
-        .attr("y2", yScale(d.max_count))
-        .attr("stroke", "#000")
-        .attr("stroke-width", 1);
-      
-      // Min cap
-      chartGroup.append("line")
-        .attr("x1", x + width/4)
-        .attr("x2", x + 3*width/4)
-        .attr("y1", yScale(d.min_count))
-        .attr("y2", yScale(d.min_count))
-        .attr("stroke", "#000")
-        .attr("stroke-width", 1);
-      
-      // Max cap
-      chartGroup.append("line")
-        .attr("x1", x + width/4)
-        .attr("x2", x + 3*width/4)
-        .attr("y1", yScale(d.max_count))
-        .attr("y2", yScale(d.max_count))
-        .attr("stroke", "#000")
-        .attr("stroke-width", 1);
-      
-      // Average point
-      chartGroup.append("circle")
-        .attr("cx", x + width/2)
-        .attr("cy", yScale(d.average_count))
-        .attr("r", 4)
-        .attr("fill", "red")
-        .append("title")
-        .text(`Average: ${d.average_count}`);
+
+      box.on("mouseover", function (event) {
+        d3.select(this).transition().duration(200).attr("fill", "#6bb6ff");
+
+        tooltip
+          .style("visibility", "visible")
+          .html(`
+            <strong>${monthName}</strong><br/>
+            Max: ${d.max.toFixed(1)}<br/>
+            Q3: ${d.q3.toFixed(1)}<br/>
+            Median: ${d.median.toFixed(1)}<br/>
+            Q1: ${d.q1.toFixed(1)}<br/>
+            Min: ${d.min.toFixed(1)}<br/>
+            Outliers: ${d.outliers.length}
+          `);
+      })
+        .on("mousemove", function (event) {
+          tooltip
+            .style("top", (event.pageY - 10) + "px")
+            .style("left", (event.pageX + 10) + "px");
+        })
+        .on("mouseout", function () {
+          d3.select(this).transition().duration(200).attr("fill", "#4c9ed9");
+          tooltip.style("visibility", "hidden");
+        });
     });
-    
-    // Add legend
-    const legend = chartGroup.append("g")
-      .attr("transform", `translate(${chartWidth - 120}, ${chartHeight - 80})`);
-    
-    // Box
-    legend.append("rect")
-      .attr("x", 0)
-      .attr("y", 0)
-      .attr("width", 15)
-      .attr("height", 30)
-      .attr("fill", "#4285F4")
-      .attr("opacity", 0.7)
-      .attr("stroke", "#000");
-    
-    // Median line
-    legend.append("line")
-      .attr("x1", 0)
-      .attr("x2", 15)
-      .attr("y1", 15)
-      .attr("y2", 15)
-      .attr("stroke", "#000")
-      .attr("stroke-width", 2);
-    
-    // Whiskers
-    legend.append("line")
-      .attr("x1", 7.5)
-      .attr("x2", 7.5)
-      .attr("y1", 0)
-      .attr("y2", -10)
-      .attr("stroke", "#000");
-    
-    legend.append("line")
-      .attr("x1", 7.5)
-      .attr("x2", 7.5)
-      .attr("y1", 30)
-      .attr("y2", 40)
-      .attr("stroke", "#000");
-    
-    // Caps
-    legend.append("line")
-      .attr("x1", 3)
-      .attr("x2", 12)
-      .attr("y1", -10)
-      .attr("y2", -10)
-      .attr("stroke", "#000");
-    
-    legend.append("line")
-      .attr("x1", 3)
-      .attr("x2", 12)
-      .attr("y1", 40)
-      .attr("y2", 40)
-      .attr("stroke", "#000");
-    
-    // Average point
-    legend.append("circle")
-      .attr("cx", 7.5)
-      .attr("cy", 50)
-      .attr("r", 4)
-      .attr("fill", "red");
-    
-    // Labels
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", -5)
-      .attr("font-size", "10px")
-      .text("Maximum");
-      
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", 5)
-      .attr("font-size", "10px")
-      .text("Q3");
-      
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", 17)
-      .attr("font-size", "10px")
-      .text("Median");
-      
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", 29)
-      .attr("font-size", "10px")
-      .text("Q1");
-      
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", 42)
-      .attr("font-size", "10px")
-      .text("Minimum");
-      
-    legend.append("text")
-      .attr("x", 20)
-      .attr("y", 54)
-      .attr("font-size", "10px")
-      .text("Average");
-    
-  }, [data, currentYear]);
-  
+
+    return () => tooltip.remove();
+  };
+
+  useEffect(() => {
+    if (data.length > 0) drawChart();
+  }, [data]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current && data.length > 0) drawChart();
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [data]);
+
+  if (loading) {
+    return <div className="w-full h-full flex items-center justify-center text-gray-600">Loading box plot data...</div>;
+  }
+
+  if (error) {
+    return <div className="w-full h-full flex items-center justify-center text-red-600">{error}</div>;
+  }
+
   return (
-    <div className="w-full h-full">
-      <svg 
-        ref={svgRef}
-        width="100%"
-        height="100%"
-      />
+    <div ref={containerRef} className="w-full h-full min-h-[400px]">
+      <svg ref={svgRef} className="w-full h-full" />
     </div>
   );
 }

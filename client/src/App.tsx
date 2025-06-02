@@ -1,21 +1,21 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import BoxPlot from './component/BoxPlot';
+import DensityMap from './component/DensityMap';
+import DataTable from './component/DataTable';
+
+interface OccurrencePoint {
+  date: string;
+  latitude: number;
+  longitude: number;
+}
 
 export default function App() {
   const [speciesList, setSpeciesList] = useState<string[]>([]);
   const [scientificNames, setScientificNames] = useState<Record<string, string>>({});
   const [selectedSpecies, setSelectedSpecies] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('2023-01-01');
-  const [heatmapUrl, setHeatmapUrl] = useState<string>('');
-  const [loading, setLoading] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [scale, setScale] = useState(1);
-
-  const zoomRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
+  const [recentData, setRecentData] = useState<OccurrencePoint[]>([]);
 
   useEffect(() => {
     fetch('http://localhost:8000/species_list')
@@ -33,31 +33,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSpecies || !currentDate) return;
-
-    const sciName = scientificNames[selectedSpecies];
-    if (!sciName) {
-      console.warn(`No scientific name mapping for selected species: ${selectedSpecies}`);
-      return;
+    if (selectedSpecies && scientificNames[selectedSpecies]) {
+      fetch(`http://localhost:8000/recent_occurrences/${encodeURIComponent(scientificNames[selectedSpecies])}`)
+        .then(res => res.json())
+        .then(data => setRecentData(data))
+        .catch(err => console.error("Error fetching recent occurrences:", err));
     }
-
-    const encoded = encodeURIComponent(sciName);
-    setLoading(true);
-
-    fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${encoded}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data?.url) {
-          setHeatmapUrl(`http://localhost:8000${data.url}`);
-        }
-      })
-      .catch(err => console.error("Error generating heatmap:", err))
-      .finally(() => {
-        setLoading(false);
-        setScale(1);
-        setOffset({ x: 0, y: 0 });
-      });
-  }, [selectedSpecies, currentDate]);
+  }, [selectedSpecies, scientificNames]);
 
   const dateObj = new Date(currentDate);
   const year = dateObj.getFullYear();
@@ -69,32 +51,6 @@ export default function App() {
     const safeDay = Math.min(newDay, new Date(newYear, newMonth + 1, 0).getDate());
     const updated = new Date(newYear, newMonth, safeDay);
     setCurrentDate(updated.toISOString().slice(0, 10));
-  };
-
-  const handleWheelZoom = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale(prev => Math.max(0.5, Math.min(5, prev + delta)));
-  };
-
-  const startDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    dragStart.current = {
-      x: e.clientX - offset.x,
-      y: e.clientY - offset.y
-    };
-  };
-
-  const doDrag = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    const newX = e.clientX - dragStart.current.x;
-    const newY = e.clientY - dragStart.current.y;
-    setOffset({ x: newX, y: newY });
-  };
-
-  const endDrag = () => {
-    setIsDragging(false);
   };
 
   return (
@@ -160,45 +116,25 @@ export default function App() {
           <div className="bg-white bg-opacity-90 border-r border-b border-gray-300 flex flex-col h-full">
             <h3 className="text-lg font-semibold text-gray-800">Species Heatmap</h3>
             <div className="flex-grow flex items-center justify-center overflow-hidden">
-              {loading ? (
-                <p className="text-lg text-blue-700">Loading heatmap...</p>
-              ) : heatmapUrl ? (
-                <div
-                  ref={zoomRef}
-                  onWheel={handleWheelZoom}
-                  onMouseDown={startDrag}
-                  onMouseMove={doDrag}
-                  onMouseUp={endDrag}
-                  onMouseLeave={endDrag}
-                  className="overflow-hidden border rounded max-w-full max-h-full relative cursor-grab"
-                >
-                  <img
-                    ref={imgRef}
-                    src={heatmapUrl}
-                    alt="Heatmap"
-                    style={{
-                      transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-                      transformOrigin: 'top left'
-                    }}
-                    className="transition-transform duration-75 ease-in-out select-none"
-                    draggable={false}
-                  />
-                </div>
-              ) : (
-                <p className="text-gray-600">Select species and date to see the heatmap.</p>
-              )}
+              <DensityMap
+                currentDate={currentDate}
+                selectedSpecies={selectedSpecies}
+                scientificNames={scientificNames}
+              />
             </div>
           </div>
 
           <div className="bg-white bg-opacity-90 border-b border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800">Analysis Panel</h3>
-            <div className="flex-grow flex items-center justify-center">
-              <p className="text-gray-600">Analysis content will go here</p>
+            <h3 className="text-lg font-semibold text-gray-800">Box Plot</h3>
+            <div className="flex-grow">
+              {selectedSpecies && scientificNames[selectedSpecies] && (
+                <BoxPlot scientificName={scientificNames[selectedSpecies]} />
+              )}
             </div>
           </div>
 
           <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 p-4">Species Information</h3>
+            <h3 className="text-lg font-semibold text-gray-800">Species Information</h3>
             <div className="flex-grow flex flex-col justify-start px-4 pb-4">
               {selectedSpecies && (
                 <div className="space-y-2">
@@ -210,10 +146,14 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-white bg-opacity-90 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 p-4">Statistics</h3>
-            <div className="flex-grow flex items-center justify-center">
-              <p className="text-gray-600">Statistics and metrics will go here</p>
+          <div className="bg-white bg-opacity-90 flex flex-col h-full overflow-hidden">
+            <h3 className="text-lg font-semibold text-gray-800 px-4 pt-2">Recent Sightings</h3>
+            <div className="flex-grow overflow-y-auto px-2 pb-2">
+              {recentData.length > 0 ? (
+                <DataTable occurrences={recentData} />
+              ) : (
+                <p className="text-gray-600 text-sm">No data available</p>
+              )}
             </div>
           </div>
         </div>
