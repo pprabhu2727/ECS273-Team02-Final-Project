@@ -1,0 +1,9 @@
+fastapi
+motor
+uvicorn
+pydantic
+pandas
+asyncio
+numpy
+aiohttp
+geopy
