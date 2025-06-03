@@ -101,35 +101,45 @@ export default function App() {
 // Load forecast data when species changes
 useEffect(() => {
   if (!selectedSpecies) return;
-  
-  console.log(`Fetching forecasts for: ${selectedSpecies}`);
-  
-  fetch(`http://localhost:8000/forecasts/${encodeURIComponent(selectedSpecies)}`)
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+
+  const fetchForecastData = async () => {
+    try {
+      // Get the scientific name from the mapping
+      const sciName = scientificNames[selectedSpecies];
+      if (!sciName) {
+        console.warn(`No scientific name mapping for: ${selectedSpecies}`);
+        setForecastData([]);
+        return;
       }
-      return res.json();
-    })
-    .then((data: SpeciesForecast) => {
-      console.log(`Received ${data.forecasts.length} forecast points for ${data.species}`);
+
+      console.log(`Fetching forecasts for: ${selectedSpecies} (${sciName})`);
+      
+      const response = await fetch(
+        `http://localhost:8000/forecasts/${encodeURIComponent(sciName)}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data: SpeciesForecast = await response.json();
+      console.log(`Received ${data.forecasts.length} forecast points`, data);
+
+      if (!data.forecasts || data.forecasts.length === 0) {
+        throw new Error('Received empty forecast data');
+      }
+
       setForecastData(data.forecasts);
       
       // Update timeline to include all data points
       if (data.forecasts.length > 0) {
-        const minDate = data.forecasts.reduce((min, f) => {
-          if (f.year < min.year || (f.year === min.year && f.month < min.month)) {
-            return f;
-          }
-          return min;
-        });
+        const minDate = data.forecasts.reduce((min, f) => 
+          (f.year < min.year || (f.year === min.year && f.month < min.month)) ? f : min
+        );
         
-        const maxDate = data.forecasts.reduce((max, f) => {
-          if (f.year > max.year || (f.year === max.year && f.month > max.month)) {
-            return f;
-          }
-          return max;
-        });
+        const maxDate = data.forecasts.reduce((max, f) => 
+          (f.year > max.year || (f.year === max.year && f.month > max.month)) ? f : max
+        );
         
         setTimeRange(prev => ({
           ...prev,
@@ -139,12 +149,15 @@ useEffect(() => {
           endMonth: maxDate.month,
         }));
       }
-    })
-    .catch(error => {
+    } catch (error) {
       console.error("Error fetching forecast data:", error);
-      setForecastData([]); // Clear data on error
-    });
-}, [selectedSpecies]);
+      setForecastData([]);
+      // Optionally set an error state to show to users
+    }
+  };
+
+  fetchForecastData();
+}, [selectedSpecies, scientificNames]);
 
 useEffect(() => {
   if (!selectedSpecies || !currentDate) return;
@@ -282,21 +295,25 @@ useEffect(() => {
  */}
 
         <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
-            <div className="flex-grow overflow-hidden p-4">
-              {forecastData.length > 0 ? (
-                <ForecastingChart 
-                  data={forecastData}
-                  timeRange={timeRange}
-                  currentDate={currentDate}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-gray-600">Loading forecast data...</p>
-                </div>
-              )}
-            </div>
+          <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
+          <div className="flex-grow overflow-hidden p-4">
+            {forecastData.length > 0 ? (
+              <ForecastingChart 
+                data={forecastData}
+                timeRange={timeRange}
+                currentDate={currentDate}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-gray-600">Loading forecast data...</p>
+              </div>
+            )}
           </div>
+        </div>
+
+
+
+
 
           <div className="bg-white bg-opacity-90 flex flex-col h-full overflow-hidden">
             <h3 className="text-lg font-semibold text-gray-800 px-4 pt-2">Recent Sightings</h3>
