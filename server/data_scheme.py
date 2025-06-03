@@ -55,7 +55,15 @@ class ForecastPoint(BaseModel):
     range_west: float
 
 class SpeciesForecastModel(BaseModel):
-    _id: PyObjectId
+    model_config = ConfigDict(
+    populate_by_name=True,
+    arbitrary_types_allowed=True,
+    json_encoders={ObjectId: str}
+    )
+
+    # _id: PyObjectId
+    id: Optional[PyObjectId] = Field(default=None, alias="_id")
+
     species: str
     scientific_name: str
     forecasts: list[ForecastPoint]
@@ -71,7 +79,15 @@ class SeasonalDataPoint(BaseModel):
     q3_count: float
 
 class SpeciesSeasonalModel(BaseModel):
-    _id: PyObjectId
+    model_config = ConfigDict(
+    populate_by_name=True,
+    arbitrary_types_allowed=True,
+    json_encoders={ObjectId: str}
+    )
+
+    # _id: PyObjectId
+    id: Optional[PyObjectId] = Field(default=None, alias="_id")
+
     species: str
     scientific_name: str
     seasonal_data: list[SeasonalDataPoint]

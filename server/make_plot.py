@@ -1,5 +1,9 @@
 import os
 import threading
+
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+
 import matplotlib.pyplot as plt
 import numpy as np
 import rasterio

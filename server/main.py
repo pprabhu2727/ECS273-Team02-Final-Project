@@ -1,3 +1,4 @@
+import re
 import os
 import logging
 from fastapi import FastAPI, HTTPException, Query
@@ -28,13 +29,21 @@ db = client.bird_tracking
 collection = db.species_occurrences
 climate_collection = db.climate
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:5173"],
+#     allow_credentials=True,
+#     allow_methods=["GET", "POST"],
+#     allow_headers=["*"],
+# )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/species_list", response_model=SpeciesListModel)
 async def get_species_list():
@@ -67,11 +76,100 @@ async def get_heatmap(date: str = Query(...), species: str = Query(...)):
     output_path = generate_and_save_heatmap(date, species)
     return {"url": f"/static/{os.path.basename(output_path)}"}
 
-@app.get("/forecasts/{species_name}", response_model=SpeciesForecastModel)
-async def get_species_forecasts(species_name: str) -> SpeciesForecastModel:
-    forecasts_collection = db.get_collection("species_forecasts")
-    forecasts = await forecasts_collection.find_one({"species": species_name})
-    return forecasts
+'''
+from fastapi.middleware.cors import CORSMiddleware
+
+@app.get("/heatmap")
+async def get_heatmap(date: str = Query(...), species: str = Query(...)):
+    from make_plot import generate_and_save_heatmap
+    output_path = generate_and_save_heatmap(date, species)
+    return JSONResponse(
+        content={"url": f"/static/{os.path.basename(output_path)}"},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
+    '''
+
+
+@app.get("/forecasts/{scientific_name}")
+async def get_species_forecasts(scientific_name: str):
+    try:
+        predictions_collection = db.get_collection("bird_predictions")
+        
+        # Case-insensitive exact match
+        regex_pattern = f"^{re.escape(scientific_name)}$"
+        cursor = predictions_collection.find({
+            "scientific_name": {
+                "$regex": regex_pattern,
+                "$options": "i"
+            }
+        }).sort([("year", 1), ("month", 1)])  # Sort by year and month
+        
+        forecasts = []
+        async for doc in cursor:
+            forecasts.append({
+                "year": doc["year"],
+                "month": doc["month"],
+                "count_prediction": doc["count_prediction"],
+                "range_north": doc["range_north"],
+                "range_south": doc["range_south"],
+                "range_east": doc["range_east"],
+                "range_west": doc["range_west"]
+            })
+        
+        if not forecasts:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No forecasts found for {scientific_name}"
+            )
+        
+        return {
+            "species": scientific_name,
+            "scientific_name": scientific_name,
+            "forecasts": forecasts
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+      
+      
+# @app.get("/forecasts/{scientific_name}")
+# async def get_species_forecasts(scientific_name: str):
+#     try:
+#         predictions_collection = db.get_collection("bird_predictions")
+        
+#         cursor = predictions_collection.find(
+#             {"scientific_name": {"$regex": f"^{scientific_name}$", "$options": "i"}}
+#         )
+        
+#         # Clean the data to match frontend expectations
+#         forecasts = []
+#         async for doc in cursor:
+#             clean_forecast = {
+#                 "year": doc["year"],
+#                 "month": doc["month"], 
+#                 "count_prediction": doc["count_prediction"],
+#                 "range_north": doc["range_north"],
+#                 "range_south": doc["range_south"],
+#                 "range_east": doc["range_east"],
+#                 "range_west": doc["range_west"]
+#             }
+#             forecasts.append(clean_forecast)
+        
+#         return {
+#             "species": scientific_name,
+#             "scientific_name": scientific_name,
+#             "forecasts": forecasts
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+    
+# @app.get("/species_list", response_model=SpeciesListModel)
+# async def get_species_list():
+#     species_collection = db.get_collection("species_list")
+#     species_list = await species_collection.find_one()
+#     return species_list
+
+
+
 
 @app.get("/seasonal/{species_name}", response_model=SpeciesSeasonalModel)
 async def get_species_seasonal_data(species_name: str) -> SpeciesSeasonalModel:
