@@ -31,25 +31,48 @@ export default function DensityMap({ currentDate, selectedSpecies, scientificNam
 
         if (headRes.ok) {
           renderImage(staticImageUrl);
-        } else {
-          const apiRes = await fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${scientificName}`);
-          if (!apiRes.ok) return;
-
-          const data = await apiRes.json();
-          if (!data?.url) return;
-
-          const fallbackUrl = `http://localhost:8000${data.url}`;
-          renderImage(fallbackUrl);
+          return;
         }
+
+        const apiRes = await fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${scientificName}`);
+        if (!apiRes.ok) {
+          console.error("Failed to request heatmap generation");
+          return;
+        }
+
+        const data = await apiRes.json();
+        if (!data?.url) {
+          console.error("No URL returned from heatmap generation");
+          return;
+        }
+
+        let retries = 8;
+        let delay = 1000;
+
+        while (retries > 0 && !cancelled) {
+          const retryRes = await fetch(staticImageUrl, { method: "HEAD" });
+
+          if (retryRes.ok) {
+            renderImage(staticImageUrl);
+            return;
+          }
+
+          await new Promise(res => setTimeout(res, delay));
+          retries--;
+          delay *= 1.5;
+        }
+
+        console.warn("PNG still not available after retries");
+
       } catch (err) {
         if (!cancelled) {
-          console.error("Error checking or rendering heatmap:", err);
+          console.error("Error in heatmap render logic:", err);
         }
       }
     };
 
     const renderImage = (url: string) => {
-      const g = svg.append("g");
+      const g = svg.append("g").attr("id", "heatmap-group");
 
       g.append("foreignObject")
         .attr("x", 0)
@@ -68,6 +91,18 @@ export default function DensityMap({ currentDate, selectedSpecies, scientificNam
         });
 
       svg.call(zoom);
+
+      // 🧠 Initial zoom-out transform (scale 0.8, center shift)
+      const bbox = svgRef.current?.getBoundingClientRect();
+      if (bbox) {
+        const initialTransform = d3.zoomIdentity
+          .translate(bbox.width * 0.1, bbox.height * 0.1)
+          .scale(0.8);
+
+        svg.transition()
+          .duration(500)
+          .call(zoom.transform, initialTransform);
+      }
     };
 
     checkAndRender();
