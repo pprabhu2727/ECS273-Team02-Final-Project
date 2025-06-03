@@ -90,19 +90,17 @@ async def get_heatmap(date: str = Query(...), species: str = Query(...)):
     '''
 
 
+
+
 @app.get("/forecasts/{scientific_name}")
 async def get_species_forecasts(scientific_name: str):
     try:
         predictions_collection = db.get_collection("bird_predictions")
         
-        # Case-insensitive exact match
-        regex_pattern = f"^{re.escape(scientific_name)}$"
+        # Don't aggregate - return all predictions with location data
         cursor = predictions_collection.find({
-            "scientific_name": {
-                "$regex": regex_pattern,
-                "$options": "i"
-            }
-        }).sort([("year", 1), ("month", 1)])  # Sort by year and month
+            "scientific_name": {"$regex": f"^{scientific_name}$", "$options": "i"}
+        }).sort([("year", 1), ("month", 1)])
         
         forecasts = []
         async for doc in cursor:
@@ -113,7 +111,9 @@ async def get_species_forecasts(scientific_name: str):
                 "range_north": doc["range_north"],
                 "range_south": doc["range_south"],
                 "range_east": doc["range_east"],
-                "range_west": doc["range_west"]
+                "range_west": doc["range_west"],
+                "latitude": doc["latitude"],  # Important!
+                "longitude": doc["longitude"]  # Important!
             })
         
         if not forecasts:
@@ -129,30 +129,38 @@ async def get_species_forecasts(scientific_name: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-      
-      
+
 # @app.get("/forecasts/{scientific_name}")
 # async def get_species_forecasts(scientific_name: str):
 #     try:
 #         predictions_collection = db.get_collection("bird_predictions")
         
-#         cursor = predictions_collection.find(
-#             {"scientific_name": {"$regex": f"^{scientific_name}$", "$options": "i"}}
-#         )
+#         # Case-insensitive exact match
+#         regex_pattern = f"^{re.escape(scientific_name)}$"
+#         cursor = predictions_collection.find({
+#             "scientific_name": {
+#                 "$regex": regex_pattern,
+#                 "$options": "i"
+#             }
+#         }).sort([("year", 1), ("month", 1)])  # Sort by year and month
         
-#         # Clean the data to match frontend expectations
 #         forecasts = []
 #         async for doc in cursor:
-#             clean_forecast = {
+#             forecasts.append({
 #                 "year": doc["year"],
-#                 "month": doc["month"], 
+#                 "month": doc["month"],
 #                 "count_prediction": doc["count_prediction"],
 #                 "range_north": doc["range_north"],
 #                 "range_south": doc["range_south"],
 #                 "range_east": doc["range_east"],
 #                 "range_west": doc["range_west"]
-#             }
-#             forecasts.append(clean_forecast)
+#             })
+        
+#         if not forecasts:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail=f"No forecasts found for {scientific_name}"
+#             )
         
 #         return {
 #             "species": scientific_name,
@@ -161,12 +169,8 @@ async def get_species_forecasts(scientific_name: str):
 #         }
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
-    
-# @app.get("/species_list", response_model=SpeciesListModel)
-# async def get_species_list():
-#     species_collection = db.get_collection("species_list")
-#     species_list = await species_collection.find_one()
-#     return species_list
+      
+      
 
 
 

@@ -3,7 +3,8 @@ import BoxPlot from './component/BoxPlot';
 import DensityMap from './component/DensityMap';
 import DataTable from './component/DataTable';
 import { useEffect, useState, useRef } from 'react';
-import ForecastingChart from './component/ForecastingChart';
+// import ForecastingChart from './component/ForecastingChart';
+import RegionalActivityHotspots from './component/RegionalActivityHotspots';
 
 interface OccurrencePoint {
   date: string;
@@ -280,22 +281,10 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800">Species Information</h3>
-            <div className="flex-grow flex flex-col justify-start px-4 pb-4">
-              {selectedSpecies && (
-                <div className="space-y-2">
-                  <p className="text-gray-800"><strong>Common Name:</strong> {selectedSpecies}</p>
-                  <p className="text-gray-800"><strong>Scientific Name:</strong> {scientificNames[selectedSpecies] || 'N/A'}</p>
-                  <p className="text-gray-800"><strong>Selected Date:</strong> {currentDate}</p>
-                </div>
-              )}
-            </div>
-          </div>
- */}
-
+          
         <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
-          <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
+          
+          {/* <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
           <div className="flex-grow overflow-hidden p-4">
             {forecastData.length > 0 ? (
               <ForecastingChart 
@@ -308,7 +297,26 @@ useEffect(() => {
                 <p className="text-gray-600">Loading forecast data...</p>
               </div>
             )}
-          </div>
+          </div> */}
+
+
+
+<h3 className="text-lg font-semibold text-gray-800 p-4">Regional Activity Hotspots</h3>
+<div className="flex-grow overflow-hidden p-4">
+  {forecastData.length > 0 ? (
+    <RegionalActivityHotspots 
+      data={forecastData}
+      timeRange={timeRange}
+      currentDate={currentDate}
+    />
+  ) : (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-gray-600">Loading regional data...</p>
+    </div>
+  )}
+</div>
+
+
         </div>
 
 
