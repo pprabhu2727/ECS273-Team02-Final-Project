@@ -1,3 +1,30 @@
+# ============== SIMPLIFIED CONFIGURATION ==============
+# Observation years to use for training
+OBSERVATION_YEARS = [2023, 2024]  # Modify this to change which years' data is used
+
+# Prediction settings - SIMPLIFIED!
+PREDICTION_START_YEAR = 2024  # Start year for prediction queries
+PREDICTION_END_YEAR = 2030    # End year for prediction queries
+
+# Spatial grid settings
+GRID_SIZE = 0.5  # Degrees for spatial aggregation (smaller = finer grid)
+
+# Model training settings
+TRAINING_EPOCHS = 100
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
+
+# MongoDB settings
+MONGO_URI = "mongodb://localhost:27017"
+MONGO_DB = "bird_tracking"
+
+# Auto-calculate months ahead based on years
+PREDICTION_MONTHS_AHEAD = (PREDICTION_END_YEAR - PREDICTION_START_YEAR + 1) * 12
+# Print configuration summary
+print(f"📅 Prediction range: {PREDICTION_START_YEAR}-{PREDICTION_END_YEAR}")
+print(f"📊 Auto-calculated months ahead: {PREDICTION_MONTHS_AHEAD}")
+# ===========================================
+
 # ============== ETL PIPELINE: OBSERVATIONS → PREDICTIONS ==============
 import numpy as np
 import pandas as pd
@@ -10,8 +37,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
 
 # MongoDB setup
-client = AsyncIOMotorClient("mongodb://localhost:27017")
-db = client.bird_tracking
+client = AsyncIOMotorClient(MONGO_URI)
+db = client[MONGO_DB]
 
 # Collections
 observations_collection = db.species_occurrences  # Input: your existing data
@@ -58,7 +85,7 @@ async def load_observations_from_mongo(scientific_name, years=None):
 
 # ============== STEP 2: DATA PREPROCESSING ==============
 
-def analyze_and_preprocess_data(df, grid_size=0.5):
+def analyze_and_preprocess_data(df):
     """
     Analyze data distribution and preprocess with outlier handling
     """
@@ -81,11 +108,11 @@ def analyze_and_preprocess_data(df, grid_size=0.5):
     df['year_month'] = df['date'].dt.to_period('M')
     
     # Create spatial grid
-    df['lat_grid'] = (df['latitude'] / grid_size).round() * grid_size
-    df['lon_grid'] = (df['longitude'] / grid_size).round() * grid_size
+    df['lat_grid'] = (df['latitude'] / GRID_SIZE).round() * GRID_SIZE
+    df['lon_grid'] = (df['longitude'] / GRID_SIZE).round() * GRID_SIZE
     
     # Aggregate by grid cell and month
-    print(f"\nAggregating with {grid_size}° grid cells...")
+    print(f"\nAggregating with {GRID_SIZE}° grid cells...")
     monthly_agg = df.groupby(['year_month', 'lat_grid', 'lon_grid']).agg({
         'count': 'sum',
         'latitude': 'mean',
@@ -203,7 +230,7 @@ class BirdLSTM(nn.Module):
 
 # ============== STEP 5: MODEL TRAINING ==============
 
-def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
+def train_model(X, y, metadata):
     """
     Train the LSTM model
     """
@@ -232,7 +259,7 @@ def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
     
     # Loss and optimizer
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=10, verbose=True
     )
@@ -242,7 +269,7 @@ def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
     train_losses = []
     test_losses = []
     
-    for epoch in range(epochs):
+    for epoch in range(TRAINING_EPOCHS):
         # Training
         model.train()
         
@@ -250,9 +277,9 @@ def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
         epoch_loss = 0
         n_batches = 0
         
-        for i in range(0, len(X_train), batch_size):
-            batch_X = X_train_tensor[i:i+batch_size]
-            batch_y = y_train_tensor[i:i+batch_size]
+        for i in range(0, len(X_train), BATCH_SIZE):
+            batch_X = X_train_tensor[i:i+BATCH_SIZE]
+            batch_y = y_train_tensor[i:i+BATCH_SIZE]
             
             optimizer.zero_grad()
             predictions = model(batch_X)
@@ -278,7 +305,7 @@ def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
         
         # Print progress
         if epoch % 20 == 0:
-            print(f"Epoch {epoch}/{epochs} - Train Loss: {avg_train_loss:.4f}, Test Loss: {test_loss:.4f}")
+            print(f"Epoch {epoch}/{TRAINING_EPOCHS} - Train Loss: {avg_train_loss:.4f}, Test Loss: {test_loss:.4f}")
     
     # Final evaluation
     model.eval()
@@ -327,7 +354,7 @@ def train_model(X, y, metadata, epochs=150, batch_size=32, learning_rate=0.001):
 
 # ============== STEP 6: GENERATE & WRITE PREDICTIONS TO MONGO ==============
 
-async def generate_and_store_predictions(model, monthly_agg, scientific_name, months_ahead=12):
+async def generate_and_store_predictions(model, monthly_agg, scientific_name):
     """
     Generate future predictions and store in MongoDB predictions collection
     """
@@ -357,7 +384,7 @@ async def generate_and_store_predictions(model, monthly_agg, scientific_name, mo
             continue
         
         # Generate predictions for next months
-        for month_offset in range(1, months_ahead + 1):
+        for month_offset in range(1, PREDICTION_MONTHS_AHEAD + 1):
             # Calculate target date
             last_date = cell_data['year_month'].iloc[-1].to_timestamp()
             target_date = last_date + pd.DateOffset(months=month_offset)
@@ -414,7 +441,7 @@ async def generate_and_store_predictions(model, monthly_agg, scientific_name, mo
         result = await predictions_collection.insert_many(documents)
         print(f"✅ Stored {len(result.inserted_ids)} predictions to MongoDB")
         print(f"   Collection: {predictions_collection.name}")
-        print(f"   Months ahead: {months_ahead}")
+        print(f"   Months ahead: {PREDICTION_MONTHS_AHEAD}")
         print(f"   Grid cells: {len(grid_cells)}")
         
         # Create index for efficient querying
@@ -429,7 +456,7 @@ async def generate_and_store_predictions(model, monthly_agg, scientific_name, mo
 
 # ============== STEP 7: ETL PIPELINE ORCHESTRATOR ==============
 
-async def run_prediction_etl_pipeline(scientific_name, years=[2023, 2024]):
+async def run_prediction_etl_pipeline(scientific_name):
     """
     Complete ETL Pipeline: MongoDB Observations → Model Training → MongoDB Predictions
     """
@@ -439,11 +466,11 @@ async def run_prediction_etl_pipeline(scientific_name, years=[2023, 2024]):
         
         # EXTRACT: Load observations from MongoDB
         print("📥 STEP 1: EXTRACTING observations from MongoDB...")
-        df = await load_observations_from_mongo(scientific_name, years)
+        df = await load_observations_from_mongo(scientific_name, OBSERVATION_YEARS)
         
         # TRANSFORM: Preprocess data
         print("\n🔄 STEP 2: TRANSFORMING data...")
-        monthly_agg, p99_threshold = analyze_and_preprocess_data(df, grid_size=0.5)
+        monthly_agg, p99_threshold = analyze_and_preprocess_data(df)
         
         # Create sequences for training
         print("\n📊 STEP 3: Creating training sequences...")
@@ -454,15 +481,14 @@ async def run_prediction_etl_pipeline(scientific_name, years=[2023, 2024]):
         
         # Train model
         print("\n🤖 STEP 4: TRAINING model...")
-        results = train_model(X, y, metadata, epochs=100, batch_size=32)
+        results = train_model(X, y, metadata)
         
         # LOAD: Generate predictions and store in MongoDB
         print("\n💾 STEP 5: LOADING predictions to MongoDB...")
         num_predictions = await generate_and_store_predictions(
             results['model'], 
             monthly_agg, 
-            scientific_name, 
-            months_ahead=12
+            scientific_name
         )
         
         # Save trained model for future use
@@ -492,14 +518,23 @@ async def run_prediction_etl_pipeline(scientific_name, years=[2023, 2024]):
         traceback.print_exc()
         return {'success': False, 'error': str(e)}
 
-# ============== STEP 8: DATA ACCESS FUNCTIONS ==============
+# ============== STEP 8: SIMPLIFIED DATA ACCESS FUNCTIONS ==============
 
-async def get_predictions_for_chart(scientific_name, start_year=2024, start_month=1, 
-                                   end_year=2025, end_month=12):
+async def get_predictions_for_chart(scientific_name, start_year=None, end_year=None):
     """
     Get predictions from MongoDB for frontend chart
-    Use this function in your other files to access prediction data
+    Now uses configured years by default and full year ranges (Jan-Dec)
     """
+    # Use configured years as defaults
+    if start_year is None:
+        start_year = PREDICTION_START_YEAR
+    if end_year is None:
+        end_year = PREDICTION_END_YEAR
+    
+    # Always use full year ranges (January to December)
+    start_month = 1
+    end_month = 12
+    
     pipeline = [
         {
             '$match': {
@@ -554,6 +589,8 @@ async def get_predictions_for_chart(scientific_name, start_year=2024, start_mont
     
     cursor = predictions_collection.aggregate(pipeline)
     chart_data = await cursor.to_list(length=None)
+    
+    print(f"📈 Retrieved {len(chart_data)} data points for {scientific_name} ({start_year}-{end_year})")
     
     return chart_data
 
@@ -612,11 +649,11 @@ async def main():
     
     for i, species in enumerate(species_list):
         print(f"\n🔄 Processing {i+1}/{len(species_list)}: {species}")
-        result = await run_prediction_etl_pipeline(species, years=[2023, 2024])
+        result = await run_prediction_etl_pipeline(species)
         results[species] = result
         
         if result['success']:
-            # Test data retrieval
+            # Test data retrieval using simplified function
             chart_data = await get_predictions_for_chart(species)
             print(f"📈 Sample chart data: {len(chart_data)} points")
             if chart_data:

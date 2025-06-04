@@ -1,9 +1,8 @@
-// import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { Calendar, ChevronDown, Loader2, MapPin, TrendingUp, Activity, Globe } from 'lucide-react';
 import BoxPlot from './component/BoxPlot';
 import DensityMap from './component/DensityMap';
 import DataTable from './component/DataTable';
-import { useEffect, useState, useRef } from 'react';
-// import ForecastingChart from './component/ForecastingChart';
 import RegionalActivityHotspots from './component/RegionalActivityHotspots';
 
 interface OccurrencePoint {
@@ -12,11 +11,10 @@ interface OccurrencePoint {
   longitude: number;
 }
 
-// Types
 interface ForecastPoint {
   year: number;
   month: number;
-  count_prediction: number;  // Updated field name
+  count_prediction: number;
   range_north: number;
   range_south: number;
   range_east: number;
@@ -47,16 +45,11 @@ export default function App() {
   const [scientificNames, setScientificNames] = useState<Record<string, string>>({});
   const [selectedSpecies, setSelectedSpecies] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('2023-01-01');
-
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [recentData, setRecentData] = useState<OccurrencePoint[]>([]);
-
   const [heatmapUrl, setHeatmapUrl] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [scale, setScale] = useState(1);
-
-
-    // Forecasting data
   const [forecastData, setForecastData] = useState<ForecastPoint[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>({
     startYear: 2023,
@@ -67,13 +60,7 @@ export default function App() {
     currentMonth: 1
   });
 
-  const zoomRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  
+  // Fetch species list
   useEffect(() => {
     fetch('http://localhost:8000/species_list')
       .then(res => res.json())
@@ -89,6 +76,7 @@ export default function App() {
       .catch(err => console.error("Error fetching species list:", err));
   }, []);
 
+  // Fetch recent occurrences
   useEffect(() => {
     if (selectedSpecies && scientificNames[selectedSpecies]) {
       fetch(`http://localhost:8000/recent_occurrences/${encodeURIComponent(scientificNames[selectedSpecies])}`)
@@ -98,96 +86,60 @@ export default function App() {
     }
   }, [selectedSpecies, scientificNames]);
 
+  // Fetch forecast data
+  useEffect(() => {
+    if (!selectedSpecies) return;
 
-// Load forecast data when species changes
-useEffect(() => {
-  if (!selectedSpecies) return;
+    const fetchForecastData = async () => {
+      try {
+        const sciName = scientificNames[selectedSpecies];
+        if (!sciName) {
+          console.warn(`No scientific name mapping for: ${selectedSpecies}`);
+          setForecastData([]);
+          return;
+        }
 
-  const fetchForecastData = async () => {
-    try {
-      // Get the scientific name from the mapping
-      const sciName = scientificNames[selectedSpecies];
-      if (!sciName) {
-        console.warn(`No scientific name mapping for: ${selectedSpecies}`);
+        const response = await fetch(
+          `http://localhost:8000/forecasts/${encodeURIComponent(sciName)}`
+        );
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data: SpeciesForecast = await response.json();
+
+        if (!data.forecasts || data.forecasts.length === 0) {
+          throw new Error('Received empty forecast data');
+        }
+
+        setForecastData(data.forecasts);
+        
+        if (data.forecasts.length > 0) {
+          const minDate = data.forecasts.reduce((min, f) => 
+            (f.year < min.year || (f.year === min.year && f.month < min.month)) ? f : min
+          );
+          
+          const maxDate = data.forecasts.reduce((max, f) => 
+            (f.year > max.year || (f.year === max.year && f.month > max.month)) ? f : max
+          );
+          
+          setTimeRange(prev => ({
+            ...prev,
+            startYear: minDate.year,
+            startMonth: minDate.month,
+            endYear: maxDate.year,
+            endMonth: maxDate.month,
+          }));
+        }
+      } catch (error) {
+        console.error("Error fetching forecast data:", error);
         setForecastData([]);
-        return;
       }
+    };
 
-      console.log(`Fetching forecasts for: ${selectedSpecies} (${sciName})`);
-      
-      const response = await fetch(
-        `http://localhost:8000/forecasts/${encodeURIComponent(sciName)}`
-      );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data: SpeciesForecast = await response.json();
-      console.log(`Received ${data.forecasts.length} forecast points`, data);
-
-      if (!data.forecasts || data.forecasts.length === 0) {
-        throw new Error('Received empty forecast data');
-      }
-
-      setForecastData(data.forecasts);
-      
-      // Update timeline to include all data points
-      if (data.forecasts.length > 0) {
-        const minDate = data.forecasts.reduce((min, f) => 
-          (f.year < min.year || (f.year === min.year && f.month < min.month)) ? f : min
-        );
-        
-        const maxDate = data.forecasts.reduce((max, f) => 
-          (f.year > max.year || (f.year === max.year && f.month > max.month)) ? f : max
-        );
-        
-        setTimeRange(prev => ({
-          ...prev,
-          startYear: minDate.year,
-          startMonth: minDate.month,
-          endYear: maxDate.year,
-          endMonth: maxDate.month,
-        }));
-      }
-    } catch (error) {
-      console.error("Error fetching forecast data:", error);
-      setForecastData([]);
-      // Optionally set an error state to show to users
-    }
-  };
-
-  fetchForecastData();
-}, [selectedSpecies, scientificNames]);
-
-useEffect(() => {
-  if (!selectedSpecies || !currentDate) return;
-
-  const sciName = scientificNames[selectedSpecies];
-  if (!sciName) {
-    console.warn(`No scientific name mapping for selected species: ${selectedSpecies}`);
-    return;
-  }
-
-  const encoded = encodeURIComponent(sciName);
-  setLoading(true);
-
-  fetch(`http://localhost:8000/heatmap?date=${currentDate}&species=${encoded}`)
-    .then(res => res.json())
-    .then(data => {
-      if (data?.url) {
-        setHeatmapUrl(`http://localhost:8000${data.url}`);
-      }
-    })
-    .catch(err => console.error("Error generating heatmap:", err))
-    .finally(() => {
-      setLoading(false);
-      setScale(1);
-      setOffset({ x: 0, y: 0 });
-    });
-}, [selectedSpecies, currentDate]);
-
-
+    fetchForecastData();
+  }, [selectedSpecies, scientificNames]);
 
   const dateObj = new Date(currentDate);
   const year = dateObj.getFullYear();
@@ -202,136 +154,123 @@ useEffect(() => {
   };
 
   return (
-    <div className="min-h-screen bg-cover bg-center bg-fixed bg-no-repeat text-white">
-      <div className="min-h-screen bg-black bg-opacity-60">
-        <div className="bg-white bg-opacity-90 rounded-none shadow p-0.5 flex flex-wrap justify-between items-center text-black gap-4">
-          <div className="relative">
-            <button onClick={() => setDropdownOpen(prev => !prev)} className="px-4 py-2 bg-blue-200 rounded shadow">
-              {selectedSpecies || 'Select Species'}
-            </button>
-            {dropdownOpen && (
-              <div className="absolute mt-2 w-64 bg-white border rounded shadow z-10 max-h-64 overflow-y-auto">
-                {speciesList.map(species => (
-                  <div key={species} onClick={() => {
-                    setSelectedSpecies(species);
-                    setDropdownOpen(false);
-                  }} className={`p-2 cursor-pointer hover:bg-blue-50 ${species === selectedSpecies ? "bg-blue-100" : ""}`}>
-                    {species}
-                  </div>
-                ))}
-              </div>
-            )}
+    <div className="h-screen bg-slate-900 overflow-hidden flex flex-col">
+      {/* Minimal inline header */}
+      <div className="bg-slate-800 px-2 py-1 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-2">
+          <Globe className="w-3 h-3 text-blue-400" />
+          <span className="font-semibold text-white">Bird Migration Tracker</span>
+          <select
+            value={selectedSpecies}
+            onChange={(e) => setSelectedSpecies(e.target.value)}
+            className="bg-slate-700 text-white px-1 py-0.5 rounded text-xs"
+          >
+            {speciesList.map((species) => (
+              <option key={species} value={species}>{species}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-1">
+          <select
+            value={year}
+            onChange={e => updateDate(parseInt(e.target.value), month, day)}
+            className="bg-slate-700 text-white px-1 rounded text-xs"
+          >
+            {[2021,2022,2023,2024,2025,2026].map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <select
+            value={month}
+            onChange={e => updateDate(year, parseInt(e.target.value), day)}
+            className="bg-slate-700 text-white px-1 rounded text-xs"
+          >
+            {['J','F','M','A','M','J','J','A','S','O','N','D'].map((m, i) => (
+              <option key={i} value={i}>{m}</option>
+            ))}
+          </select>
+          <input
+            type="range"
+            min={1}
+            max={maxDays}
+            value={day}
+            onChange={e => updateDate(year, month, parseInt(e.target.value))}
+            className="w-10 h-1"
+          />
+          <span className="text-white">{day}</span>
+        </div>
+      </div>
+
+      {/* Main content - custom grid */}
+      <div className="flex-1 p-1 grid gap-1" style={{ 
+        display: 'grid',
+        gridTemplateColumns: '55% 42%',
+        gridTemplateRows: '49% 53%',
+        height: 'calc(100vh - 28px)'
+      }}>
+        {/* Heatmap - wider for USA map */}
+        <div className="bg-slate-800 rounded overflow-hidden">
+          <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
+            <Activity className="w-3 h-3 text-blue-400" />
+            Heatmap
           </div>
-
-          <div className="flex items-center gap-4 flex-wrap">
-            <select
-              value={year}
-              onChange={e => updateDate(parseInt(e.target.value), month, day)}
-              className="border rounded px-2 py-1"
-            >
-              {Array.from({ length: 6 }, (_, i) => 2021 + i).map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-
-            <select
-              value={month}
-              onChange={e => updateDate(year, parseInt(e.target.value), day)}
-              className="border rounded px-2 py-1"
-            >
-              {Array.from({ length: 12 }, (_, i) => (
-                <option key={i} value={i}>
-                  {new Date(0, i).toLocaleString('default', { month: 'long' })}
-                </option>
-              ))}
-            </select>
-
-            <div className="flex flex-col items-center text-sm">
-              <input
-                type="range"
-                min={1}
-                max={maxDays}
-                value={day}
-                onChange={e => updateDate(year, month, parseInt(e.target.value))}
-                className="w-40"
-              />
-              <span>{day}</span>
-            </div>
+          <div style={{ height: 'calc(100% - 20px)' }}>
+            <DensityMap
+              currentDate={currentDate}
+              selectedSpecies={selectedSpecies}
+              scientificNames={scientificNames}
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-2 grid-rows-2 gap-0 h-[calc(100vh-80px)]">
-          <div className="bg-white bg-opacity-90 border-r border-b border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800">Species Heatmap</h3>
-            <div className="flex-grow flex items-center justify-center overflow-hidden">
-              <DensityMap
-                currentDate={currentDate}
-                selectedSpecies={selectedSpecies}
-                scientificNames={scientificNames}
-              />
-            </div>
+        {/* Box Plot - narrower */}
+        <div className="bg-slate-800 rounded overflow-hidden">
+          <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
+            <TrendingUp className="w-3 h-3 text-green-400" />
+            Monthly
           </div>
-
-          <div className="bg-white bg-opacity-90 border-b border-gray-300 flex flex-col h-full">
-            <h3 className="text-lg font-semibold text-gray-800">Box Plot</h3>
-            <div className="flex-grow">
-              {selectedSpecies && scientificNames[selectedSpecies] && (
-                <BoxPlot scientificName={scientificNames[selectedSpecies]} />
-              )}
-            </div>
+          <div style={{ height: 'calc(100% - 20px)' }}>
+            {selectedSpecies && scientificNames[selectedSpecies] && (
+              <BoxPlot scientificName={scientificNames[selectedSpecies]} />
+            )}
           </div>
+        </div>
 
-          
-        <div className="bg-white bg-opacity-90 border-r border-gray-300 flex flex-col h-full">
-          
-          {/* <h3 className="text-lg font-semibold text-gray-800 p-4">Predictive Future Projections</h3>
-          <div className="flex-grow overflow-hidden p-4">
+        {/* Regional Activity - taller for line chart */}
+        <div className="bg-slate-800 rounded overflow-hidden">
+          <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
+            <Globe className="w-3 h-3 text-purple-400" />
+            Regional
+          </div>
+          <div style={{ height: 'calc(100% - 20px)' }}>
             {forecastData.length > 0 ? (
-              <ForecastingChart 
+              <RegionalActivityHotspots 
                 data={forecastData}
                 timeRange={timeRange}
                 currentDate={currentDate}
               />
             ) : (
               <div className="flex items-center justify-center h-full">
-                <p className="text-gray-600">Loading forecast data...</p>
+                <p className="text-slate-400 text-xs">Loading...</p>
               </div>
             )}
-          </div> */}
-
-
-
-<h3 className="text-lg font-semibold text-gray-800 p-4">Regional Activity Hotspots</h3>
-<div className="flex-grow overflow-hidden p-4">
-  {forecastData.length > 0 ? (
-    <RegionalActivityHotspots 
-      data={forecastData}
-      timeRange={timeRange}
-      currentDate={currentDate}
-    />
-  ) : (
-    <div className="flex items-center justify-center h-full">
-      <p className="text-gray-600">Loading regional data...</p>
-    </div>
-  )}
-</div>
-
-
+          </div>
         </div>
 
-
-
-
-
-          <div className="bg-white bg-opacity-90 flex flex-col h-full overflow-hidden">
-            <h3 className="text-lg font-semibold text-gray-800 px-4 pt-2">Recent Sightings</h3>
-            <div className="flex-grow overflow-y-auto px-2 pb-2">
-              {recentData.length > 0 ? (
-                <DataTable occurrences={recentData} />
-              ) : (
-                <p className="text-gray-600 text-sm">No data available</p>
-              )}
-            </div>
+        {/* Table - can scroll */}
+        <div className="bg-slate-800 rounded overflow-hidden">
+          <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
+            <MapPin className="w-3 h-3 text-orange-400" />
+            Sightings ({recentData.length})
+          </div>
+          <div style={{ height: 'calc(100% - 20px)' }} className="overflow-auto">
+            {recentData.length > 0 ? (
+              <DataTable occurrences={recentData} />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-slate-400 text-xs">No data</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

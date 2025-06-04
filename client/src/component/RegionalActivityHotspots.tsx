@@ -39,12 +39,12 @@ const RegionalActivityHotspots: React.FC<RegionalActivityHotspotsProps> = ({
     
     // Define latitude bands for US regions
     const regions = {
-      'Southern US (25-35°N)': { min: 25, max: 35, color: '#ef4444' }, // red
-      'Central US (35-45°N)': { min: 35, max: 45, color: '#3b82f6' },  // blue
-      'Northern US (45-55°N)': { min: 45, max: 55, color: '#10b981' }  // green
+      'Southern US': { min: 25, max: 35, color: '#ef4444' },
+      'Central US': { min: 35, max: 45, color: '#3b82f6' },
+      'Northern US': { min: 45, max: 55, color: '#10b981' }
     };
     
-    // Group data by month and calculate regional averages
+    // Group data by month and calculate regional sums
     const monthlyData = new Map();
     
     data.forEach(point => {
@@ -56,33 +56,25 @@ const RegionalActivityHotspots: React.FC<RegionalActivityHotspotsProps> = ({
           monthKey,
           'Southern US': 0,
           'Central US': 0,
-          'Northern US': 0,
-          'Southern Count': 0,
-          'Central Count': 0,
-          'Northern Count': 0
+          'Northern US': 0
         });
       }
       
       const monthData = monthlyData.get(monthKey);
-      
-      // Use actual latitude if available, otherwise skip this point
       const lat = point.latitude;
       
       if (lat !== undefined) {
         if (lat >= 25 && lat < 35) {
           monthData['Southern US'] += point.count_prediction;
-          monthData['Southern Count'] += 1;
         } else if (lat >= 35 && lat < 45) {
           monthData['Central US'] += point.count_prediction;
-          monthData['Central Count'] += 1;
         } else if (lat >= 45 && lat < 55) {
           monthData['Northern US'] += point.count_prediction;
-          monthData['Northern Count'] += 1;
         }
       }
     });
     
-    // Format for chart - using SUMS instead of averages
+    // Format for chart
     return Array.from(monthlyData.values())
       .map(month => ({
         date: month.date.toLocaleDateString('en-US', { 
@@ -90,31 +82,12 @@ const RegionalActivityHotspots: React.FC<RegionalActivityHotspotsProps> = ({
           month: 'short' 
         }),
         timestamp: month.date.getTime(),
-        'Southern US': month['Southern US'],  // Total birds (sum)
-        'Central US': month['Central US'],    // Total birds (sum)
-        'Northern US': month['Northern US'],  // Total birds (sum)
+        'Southern US': month['Southern US'],
+        'Central US': month['Central US'],
+        'Northern US': month['Northern US'],
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
   }, [data]);
-
-  const currentDateObj = new Date(currentDate);
-  
-  // Custom tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white p-3 border border-gray-300 rounded shadow-lg">
-          <p className="font-semibold">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} style={{ color: entry.color }}>
-              {`${entry.name}: ${entry.value.toFixed(1)} birds`}
-            </p>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
 
   // Find peak months for each region
   const peakMonths = React.useMemo(() => {
@@ -141,25 +114,42 @@ const RegionalActivityHotspots: React.FC<RegionalActivityHotspotsProps> = ({
   if (processedData.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="text-gray-500">No regional data available</p>
+        <p className="text-gray-400 text-xs">No regional data available</p>
       </div>
     );
   }
 
+  // Custom compact tooltip
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-800 p-1.5 border border-slate-600 rounded shadow-lg">
+          <p className="text-xs text-white font-semibold">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} className="text-xs" style={{ color: entry.color }}>
+              {`${entry.name}: ${Math.round(entry.value)} birds`}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={processedData}
             margin={{
-              top: 20,
-              right: 30,
-              left: 20,
-              bottom: 60,
+              top: 5,
+              right: 10,
+              left: 5,
+              bottom: 25,
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            <CartesianGrid strokeDasharray="3 3" opacity={0.2} stroke="#475569" />
             <XAxis 
               dataKey="timestamp"
               scale="time"
@@ -170,82 +160,84 @@ const RegionalActivityHotspots: React.FC<RegionalActivityHotspotsProps> = ({
                   month: 'short' 
                 })
               }
-              tick={{ fontSize: 12 }}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
               angle={-45}
               textAnchor="end"
-              height={60}
+              height={25}
             />
             <YAxis 
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              width={45}
+              tickFormatter={(value) => value >= 1000 ? `${(value/1000).toFixed(1)}k` : value}
               label={{ 
                 value: 'Average Sightings', 
                 angle: -90, 
                 position: 'insideLeft',
-                style: { textAnchor: 'middle' }
+                style: { fontSize: 10, fill: '#94a3b8' }
               }}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend />
+            <Legend 
+              wrapperStyle={{ paddingTop: '5px', fontSize: '11px' }}
+              iconSize={12}
+            />
             
-            {/* Southern US line */}
             <Line
               type="monotone"
               dataKey="Southern US"
               stroke="#ef4444"
-              strokeWidth={2}
+              strokeWidth={1.5}
               dot={false}
-              activeDot={{ r: 5 }}
+              activeDot={{ r: 3 }}
             />
             
-            {/* Central US line */}
             <Line
               type="monotone"
               dataKey="Central US"
               stroke="#3b82f6"
-              strokeWidth={2}
+              strokeWidth={1.5}
               dot={false}
-              activeDot={{ r: 5 }}
+              activeDot={{ r: 3 }}
             />
             
-            {/* Northern US line */}
             <Line
               type="monotone"
               dataKey="Northern US"
               stroke="#10b981"
-              strokeWidth={2}
+              strokeWidth={1.5}
               dot={false}
-              activeDot={{ r: 5 }}
+              activeDot={{ r: 3 }}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
       
-      {/* Peak activity summary */}
-      <div className="mt-4 p-4 bg-gray-50 rounded">
-        <h4 className="font-medium mb-2">Peak Migration Times</h4>
+      {/* Compact Peak activity summary */}
+      <div className="mt-1 p-2 bg-slate-700/50 rounded border border-slate-600">
+        <h4 className="text-xs font-medium text-white mb-1">Peak Migration Times</h4>
         
-        <div className="grid grid-cols-3 gap-2 text-sm">
-          <div className="bg-red-100 p-3 rounded">
-            <p className="font-semibold text-red-900">Southern US</p>
-            <p className="text-sm text-gray-800">{peakMonths['Southern US'].month}</p>
-            <p className="text-sm text-gray-800">~{peakMonths['Southern US'].value.toFixed(0)} birds</p>
+        <div className="grid grid-cols-3 gap-1 text-xs">
+          <div className="bg-red-900/20 p-1.5 rounded border border-red-800/30">
+            <p className="font-semibold text-red-400">Southern US</p>
+            <p className="text-gray-300">{peakMonths['Southern US'].month}</p>
+            <p className="text-gray-400">~{peakMonths['Southern US'].value.toFixed(0)} birds</p>
           </div>
-          <div className="bg-blue-100 p-3 rounded">
-            <p className="font-semibold text-blue-900">Central US</p>
-            <p className="text-sm text-gray-800">{peakMonths['Central US'].month}</p>
-            <p className="text-sm text-gray-800">~{peakMonths['Central US'].value.toFixed(0)} birds</p>
+          <div className="bg-blue-900/20 p-1.5 rounded border border-blue-800/30">
+            <p className="font-semibold text-blue-400">Central US</p>
+            <p className="text-gray-300">{peakMonths['Central US'].month}</p>
+            <p className="text-gray-400">~{peakMonths['Central US'].value.toFixed(0)} birds</p>
           </div>
-          <div className="bg-green-100 p-3 rounded">
-            <p className="font-semibold text-green-900">Northern US</p>
-            <p className="text-sm text-gray-800">{peakMonths['Northern US'].month}</p>
-            <p className="text-sm text-gray-800">~{peakMonths['Northern US'].value.toFixed(0)} birds</p>
+          <div className="bg-green-900/20 p-1.5 rounded border border-green-800/30">
+            <p className="font-semibold text-green-400">Northern US</p>
+            <p className="text-gray-300">{peakMonths['Northern US'].month}</p>
+            <p className="text-gray-400">~{peakMonths['Northern US'].value.toFixed(0)} birds</p>
           </div>
         </div>
 
-
-        <p className="text-xs text-gray-600 mt-2">
-          Migration typically progresses northward, with peak activity shifting from south to north through spring.
-        </p>
       </div>
+        <p className="text-xs text-gray-400 mt-1.5 leading-tight">
+          
+        </p>
     </div>
   );
 };
