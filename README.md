@@ -85,28 +85,33 @@ npm install
 
 1. Return to the server directory and populate the database with  data:
 
-Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
-Unzip the folder inside the ./server/ folder so you have ./server/data/{The data files}
-
-(NOTE: For testing purposes its recommended to use about two species. To do this, inside the data folder are .csv files for some years. Delete the .csv files for every year for all but 2 species[ex. you only have species1.csv and species2.csv under each folder])
-
-Note that there are potentially over 5 million entries if using the entire species list. 
+If you want to load ALL our data follow these steps, otherwise skip this step (as data folder is already loaded with small sample dataset)
+- Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
+- Unzip the folder and replace the current data file, located: ./server/data/{The data files}
+- Again, this will take hours to full load data to our database, so for testing, it is reccommend to skip this step.
+Note that there are over 5 million entries if using the entire dataset from the google drive link. 
+Our small sample dataset has under 200K entires, so it will process much faster for you.
 
 ### Step 5: Load Data into MongoDB 
- 1. While in the client directory
-
+ 1. Make your way to the server directory
+```powershell
+cd..
+cd server
+```   
+Then, 
 ```powershell
 python import_occurence_data.py
 ```
-This process will take a while. 
+This process will take a while with the FULL dataset proided in the Google Drive link.
+For testing, please use the small sample datset that is already preloaded. (no need to download data)
 
 ### Step 6: Generate Predictions
- 1. While in the client directory
+ 1. While in the server directory
 
 ```powershell
 python predictions.py
 ```
-This process will take a while. 
+This process will take a while if using FULL dataset from Google Drive link. 
 
 ## Execution
 
@@ -122,10 +127,9 @@ net start MongoDB
 
 2. **Launch the Backend Server**:
 
-Open a new PowerShell window and navigate to the server directory:
+While in the server directory: 
 
 ```powershell
-cd server
 uvicorn main:app --reload --port 8000
 ```
 
@@ -143,7 +147,7 @@ npm install
 npm run dev
 ```
 
-The React frontend will start on `http://localhost:5173` (or another port if 5173 is busy).
+The React frontend will start on `http://localhost:5173` (or another port if 5173 is busy, it will let you know in the terminal).
 
 4. **Access the Dashboard**:
 
