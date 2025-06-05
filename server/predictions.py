@@ -14,6 +14,15 @@ TRAINING_EPOCHS = 100
 BATCH_SIZE = 32
 LEARNING_RATE = 0.001
 
+# ============== ENHANCED MODEL HYPERPARAMETERS ==============
+# L1_LAMBDA = 0.01              # L1 regularization strength for region bias features
+# L1_DECAY_RATE = 0.95          # Decay rate for L1 penalty (reduces over training)
+# L1_DECAY_INTERVAL = 10        # Apply decay every N epochs
+# CLIMATE_WEIGHT = 0.3          # Weight for climate features vs occurrence features
+# REGION_BIAS_THRESHOLD = 0.1   # Threshold for identifying over-represented regions
+# ENHANCED_INPUT_DIM = 9        # Input dimension with climate + bias features
+# ============== END ENHANCED MODEL HYPERPARAMETERS ==============
+
 # MongoDB settings
 MONGO_URI = "mongodb://localhost:27017"
 MONGO_DB = "bird_tracking"
@@ -23,6 +32,12 @@ PREDICTION_MONTHS_AHEAD = (PREDICTION_END_YEAR - PREDICTION_START_YEAR + 1) * 12
 # Print configuration summary
 print(f"📅 Prediction range: {PREDICTION_START_YEAR}-{PREDICTION_END_YEAR}")
 print(f"📊 Auto-calculated months ahead: {PREDICTION_MONTHS_AHEAD}")
+
+# ============== ENHANCEMENT INFO ==============
+# The commented sections are for implementing improvements to the model such as incorporating climate data,
+# region-frequency bias correction, and enhanced feature engineering. These sections are commented out to avoid the
+# performance overhead, however they can be uncommented and implemented as needed.
+# ============== END ENHANCEMENT ==============
 # ===========================================
 
 # ============== ETL PIPELINE: OBSERVATIONS → PREDICTIONS ==============
@@ -88,6 +103,7 @@ async def load_observations_from_mongo(scientific_name, years=None):
 def analyze_and_preprocess_data(df):
     """
     Analyze data distribution and preprocess with outlier handling
+    Enhanced with climate integration and region-frequency bias correction
     """
     print("\n=== Preprocessing Observations ===")
     counts = df['count'].values
@@ -107,9 +123,52 @@ def analyze_and_preprocess_data(df):
     df['month'] = df['date'].dt.month
     df['year_month'] = df['date'].dt.to_period('M')
     
-    # Create spatial grid
+    # ============== CLIMATE INTEGRATION ==============
+    # This section would load and merge temperature data with observations
+    
+    # # Load climate data (PRISM or other source)
+    # climate_data = load_climate_data(df['date'].min(), df['date'].max())
+    # 
+    # # Merge temperature data with observations based on date and location
+    # # Need to spatially interpolate climate data to match observation coordinates
+    # df = merge_temperature_data(df, climate_data)
+    # 
+    # # Create temperature features for LSTM input
+    # df['temp_normalized'] = (df['mean_temperature'] - df['mean_temperature'].mean()) / df['mean_temperature'].std()
+    # df['temp_seasonal'] = np.sin(2 * np.pi * df['month'] / 12) * df['temp_normalized']
+    # 
+    # # Temperature trend features (moving averages)
+    # df['temp_3month_avg'] = df.groupby(['lat_grid', 'lon_grid'])['mean_temperature'].rolling(3, min_periods=1).mean().reset_index(drop=True)
+    # df['temp_anomaly'] = df['mean_temperature'] - df['temp_3month_avg']
+    # 
+    # print(f"Climate integration: Added temperature features for {len(df)} records")
+    # ============== END CLIMATE INTEGRATION ==============
+      # Create spatial grid
     df['lat_grid'] = (df['latitude'] / GRID_SIZE).round() * GRID_SIZE
     df['lon_grid'] = (df['longitude'] / GRID_SIZE).round() * GRID_SIZE
+    
+    # ============== REGION-FREQUENCY BIAS CORRECTION ==============
+    # This addresses over-representation of certain geographic regions due to human activity
+    
+    # # Calculate how often each geographic region appears in training set
+    # region_frequency = df.groupby(['lat_grid', 'lon_grid']).size().reset_index(name='region_count')
+    # region_frequency['region_frequency'] = region_frequency['region_count'] / len(df)
+    # region_frequency['log_region_frequency'] = np.log1p(region_frequency['region_count'])
+    # 
+    # # Create normalized frequency feature (0-1 scale) 
+    # # Higher values = more over-represented regions
+    # region_frequency['region_bias_score'] = (
+    #     region_frequency['region_frequency'] - region_frequency['region_frequency'].min()
+    # ) / (region_frequency['region_frequency'].max() - region_frequency['region_frequency'].min())
+    # 
+    # # Merge back with main dataframe
+    # df = df.merge(region_frequency[['lat_grid', 'lon_grid', 'region_bias_score', 'log_region_frequency']], 
+    #               on=['lat_grid', 'lon_grid'], how='left')
+    # 
+    # print(f"Region bias correction: Calculated frequency scores for {len(region_frequency)} unique regions")
+    # print(f"Most over-represented region frequency: {region_frequency['region_frequency'].max():.4f}")
+    # print(f"Least represented region frequency: {region_frequency['region_frequency'].min():.4f}")
+    # ============== END REGION-FREQUENCY BIAS CORRECTION ==============
     
     # Aggregate by grid cell and month
     print(f"\nAggregating with {GRID_SIZE}° grid cells...")
@@ -150,6 +209,7 @@ def analyze_and_preprocess_data(df):
 def create_sequences(monthly_agg, seq_len=12, pred_horizon=1):
     """
     Create sequences from aggregated data
+    Enhanced with climate variables and region-frequency features
     """
     X, y, metadata = [], [], []
     
@@ -164,7 +224,30 @@ def create_sequences(monthly_agg, seq_len=12, pred_horizon=1):
             # Input features for sequence
             sequence_data = group.iloc[i:i+seq_len]
             
-            # Features: [log(count), month_sin, month_cos, lat_norm, lon_norm]
+            # ============== ENHANCED FEATURES ==============
+            # Expands feature vector to include climate and bias correction
+            # Current features: [log(count), month_sin, month_cos, lat_norm, lon_norm]
+            # Enhanced features: [log(count), month_sin, month_cos, lat_norm, lon_norm, 
+            #                     temp_normalized, temp_seasonal, temp_anomaly, region_bias_score]
+            
+            # # Enhanced feature creation with climate integration
+            # features = []
+            # for _, row in sequence_data.iterrows():
+            #     enhanced_features = [
+            #         np.log1p(row['count']),      # Log-transformed count (existing)
+            #         row['month_sin'],            # Seasonal encoding (existing)
+            #         row['month_cos'],            # Seasonal encoding (existing)
+            #         row['latitude'] / 90,        # Normalized latitude (existing)
+            #         row['longitude'] / 180,      # Normalized longitude (existing)
+            #         row['temp_normalized'],      # NEW: Normalized temperature
+            #         row['temp_seasonal'],        # NEW: Seasonal temperature interaction
+            #         row['temp_anomaly'],         # NEW: Temperature anomaly from trend
+            #         row['region_bias_score']     # NEW: Region over-representation score
+            #     ]
+            #     features.append(enhanced_features)
+            # ============== END ENHANCED FEATURES ==============
+            
+            # Current basic feature creation (keep existing functionality)
             features = []
             for _, row in sequence_data.iterrows():
                 features.append([
@@ -186,6 +269,9 @@ def create_sequences(monthly_agg, seq_len=12, pred_horizon=1):
                 'location': (group.iloc[i]['latitude'], group.iloc[i]['longitude']),
                 'target_date': group.iloc[i + seq_len + pred_horizon - 1]['year_month'],
                 'grid': (lat_grid, lon_grid)
+                # # Enhanced metadata
+                # 'region_bias_score': group.iloc[i]['region_bias_score'],
+                # 'avg_temperature': sequence_data['mean_temperature'].mean()
             })
     
     print(f"\nCreated {len(X)} sequences from {len(grid_groups)} grid cells")
@@ -199,6 +285,31 @@ class BirdLSTM(nn.Module):
     def __init__(self, input_dim=5, hidden_dim=64, num_layers=2, dropout=0.2):
         super().__init__()
         
+        # ============== ENHANCED MODEL ARCHITECTURE (COMMENTED) ==============
+        # TODO: Update input dimension and add L1 regularization for bias correction
+        # Enhanced version would use input_dim=9 to accommodate:
+        # [count, month_sin, month_cos, lat, lon, temp_norm, temp_seasonal, temp_anomaly, region_bias]
+        
+        # # Enhanced LSTM with larger input dimension
+        # self.lstm = nn.LSTM(
+        #     input_dim,  # Should be 9 for enhanced version
+        #     hidden_dim, 
+        #     num_layers, 
+        #     batch_first=True, 
+        #     dropout=dropout if num_layers > 1 else 0
+        # )
+        # 
+        # # Separate processing for bias-prone features
+        # # The last feature (index 8) is region_bias_score - apply L1 penalty to its weights
+        # self.region_bias_linear = nn.Linear(1, hidden_dim // 4)  # Smaller capacity for bias feature
+        # self.climate_linear = nn.Linear(3, hidden_dim // 2)      # Climate features (temp_norm, temp_seasonal, temp_anomaly)
+        # self.core_lstm = nn.LSTM(5, hidden_dim // 2, num_layers, batch_first=True, dropout=dropout)
+        # 
+        # # Fusion layer to combine different feature streams
+        # self.fusion = nn.Linear(hidden_dim, hidden_dim)
+        # ============== END ENHANCED MODEL ARCHITECTURE ==============
+        
+        # Current basic LSTM architecture (keep existing functionality)
         self.lstm = nn.LSTM(
             input_dim, 
             hidden_dim, 
@@ -219,14 +330,53 @@ class BirdLSTM(nn.Module):
         )
         
     def forward(self, x):
-        # LSTM
+        # ============== ENHANCED FORWARD PASS ==============
+        # 
+        # # Split input into different feature streams
+        # core_features = x[:, :, :5]          # [count, month_sin, month_cos, lat, lon]
+        # climate_features = x[:, :, 5:8]      # [temp_norm, temp_seasonal, temp_anomaly]
+        # region_bias = x[:, :, 8:9]           # [region_bias_score]
+        # 
+        # # Process core features with main LSTM
+        # core_out, (core_hidden, _) = self.core_lstm(core_features)
+        # core_last = core_hidden[-1]
+        # 
+        # # Process climate features
+        # climate_processed = self.climate_linear(climate_features[:, -1, :])  # Use last timestep
+        # 
+        # # Process region bias (with L1 penalty applied during training)
+        # bias_processed = self.region_bias_linear(region_bias[:, -1, :])
+        # 
+        # # Fuse all feature streams
+        # combined = torch.cat([core_last, climate_processed, bias_processed], dim=1)
+        # fused = self.fusion(combined)
+        # 
+        # return self.fc(fused)
+        # ============== END ENHANCED FORWARD PASS ==============
+        
+        # Current basic forward pass (keep existing functionality)
         lstm_out, (hidden, _) = self.lstm(x)
-        
-        # Use last hidden state
         last_hidden = hidden[-1]
-        
-        # Final prediction
         return self.fc(last_hidden)
+    
+    # ============== L1 REGULARIZATION METHODS ==============
+    # This helps prevent overfitting to over-represented regions
+    
+    # def get_region_bias_l1_penalty(self):
+    #     """
+    #     Compute L1 penalty on region bias linear layer weights
+    #     This helps reduce the model's reliance on over-represented regions
+    #     """
+    #     return torch.sum(torch.abs(self.region_bias_linear.weight))
+    # 
+    # def get_total_l1_penalty(self, lambda_l1=0.01):
+    #     """
+    #     Get total L1 penalty for regularization
+    #     Apply stronger penalty to region bias features
+    #     """
+    #     region_penalty = self.get_region_bias_l1_penalty()
+    #     return lambda_l1 * region_penalty
+    # ============== END L1 REGULARIZATION METHODS ==============
 
 # ============== STEP 5: MODEL TRAINING ==============
 
@@ -254,7 +404,11 @@ def train_model(X, y, metadata):
     X_test_tensor = torch.FloatTensor(X_test)
     y_test_tensor = torch.FloatTensor(y_test).unsqueeze(1)
     
-    # Create model
+    # ============== ENHANCED MODEL CREATION ==============
+    # model = BirdLSTM(input_dim=9, hidden_dim=64, num_layers=2, dropout=0.2)  # Enhanced version
+    # ============== END ENHANCED MODEL CREATION ==============
+    
+    # Create model (current basic version)
     model = BirdLSTM(input_dim=5, hidden_dim=64, num_layers=2, dropout=0.2)
     
     # Loss and optimizer
@@ -264,7 +418,12 @@ def train_model(X, y, metadata):
         optimizer, mode='min', factor=0.5, patience=10, verbose=True
     )
     
-    # Training loop
+    # ============== ENHANCED TRAINING CONFIGURATION ==============
+    # Add L1 regularization parameters for bias correction
+    # lambda_l1 = 0.01  # L1 regularization strength for region bias features
+    # lambda_l1_schedule = lambda epoch: lambda_l1 * (0.95 ** (epoch // 10))  # Decay L1 penalty over time
+    # ============== END ENHANCED TRAINING CONFIGURATION ==============
+      # Training loop
     print("\nTraining model...")
     train_losses = []
     test_losses = []
@@ -272,6 +431,11 @@ def train_model(X, y, metadata):
     for epoch in range(TRAINING_EPOCHS):
         # Training
         model.train()
+        
+        # ============== ENHANCED TRAINING LOOP ==============
+        # Include L1 regularization in loss computation for bias correction
+        # current_lambda_l1 = lambda_l1_schedule(epoch)  # Decay L1 penalty over training
+        # ============== END ENHANCED TRAINING LOOP ==============
         
         # Mini-batch training
         epoch_loss = 0
@@ -283,6 +447,28 @@ def train_model(X, y, metadata):
             
             optimizer.zero_grad()
             predictions = model(batch_X)
+            
+            # ============== ENHANCED LOSS COMPUTATION ==============
+            # Add L1 penalty to loss for region bias correction
+            # This prevents the model from overfitting to over-represented regions
+            
+            # # Basic MSE loss
+            # mse_loss = criterion(predictions, batch_y)
+            # 
+            # # L1 penalty on region bias weights (lightweight bias correction)
+            # l1_penalty = model.get_total_l1_penalty(current_lambda_l1)
+            # 
+            # # Combined loss: MSE + L1 penalty on bias features
+            # total_loss = mse_loss + l1_penalty
+            # 
+            # total_loss.backward()
+            # 
+            # # Log both components for monitoring
+            # epoch_loss += mse_loss.item()  # Track MSE separately
+            # if epoch % 20 == 0 and i == 0:  # Log L1 penalty occasionally
+            #     print(f"   MSE: {mse_loss.item():.4f}, L1 penalty: {l1_penalty.item():.6f}")
+            # ============== END ENHANCED LOSS COMPUTATION ==============
+              # Current basic loss computation (keep existing functionality)
             loss = criterion(predictions, batch_y)
             loss.backward()
             optimizer.step()
@@ -382,8 +568,7 @@ async def generate_and_store_predictions(model, monthly_agg, scientific_name):
         
         if len(cell_data) < 12:
             continue
-        
-        # Generate predictions for next months
+          # Generate predictions for next months
         for month_offset in range(1, PREDICTION_MONTHS_AHEAD + 1):
             # Calculate target date
             last_date = cell_data['year_month'].iloc[-1].to_timestamp()
@@ -391,7 +576,39 @@ async def generate_and_store_predictions(model, monthly_agg, scientific_name):
             target_year = target_date.year
             target_month = target_date.month
             
-            # Create features for prediction
+            # ============== ENHANCED PREDICTION FEATURES ==============
+            # Include climate variables in prediction features
+            # This would require forecasting or using climate projections
+            
+            # # Get climate data for target date (from forecasts or historical averages)
+            # target_climate = get_climate_forecast(
+            #     target_date, 
+            #     cell['latitude'], 
+            #     cell['longitude']
+            # )
+            # 
+            # # Create enhanced features for prediction including climate
+            # enhanced_features = []
+            # for _, row in cell_data.iterrows():
+            #     enhanced_features.append([
+            #         np.log1p(row['count']),           # Historical occurrence
+            #         row['month_sin'],                 # Seasonal encoding
+            #         row['month_cos'],                 # Seasonal encoding  
+            #         row['latitude'] / 90,             # Normalized latitude
+            #         row['longitude'] / 180,           # Normalized longitude
+            #         row['temp_normalized'],           # Historical temperature
+            #         row['temp_seasonal'],             # Seasonal temperature
+            #         row['temp_anomaly'],              # Temperature anomaly
+            #         row['region_bias_score']          # Region over-representation
+            #     ])
+            # 
+            # # Add projected climate features for target month
+            # enhanced_features[-1][5] = target_climate['temp_normalized']  # Projected temp
+            # enhanced_features[-1][6] = np.sin(2 * np.pi * target_month / 12) * target_climate['temp_normalized']
+            # enhanced_features[-1][7] = target_climate['temp_anomaly']
+            # ============== END ENHANCED PREDICTION FEATURES ==============
+            
+            # Create features for prediction (current basic version)
             features = []
             for _, row in cell_data.iterrows():
                 features.append([

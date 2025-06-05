@@ -7,3 +7,4 @@ asyncio
 numpy
 aiohttp
 geopy
+rasterio

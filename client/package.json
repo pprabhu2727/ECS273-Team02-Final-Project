@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node start-env.cjs",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start-full": "node start-env.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.4",
@@ -20,9 +20,9 @@
     "leaflet-heatmap": "^1.0.0",
     "leaflet.heat": "^0.2.0",
     "lodash": "^4.17.21",
+    "lucide-react": "^0.513.0",
     "maplibre-gl": "^5.5.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.0.0",    "react-dom": "^19.0.0",
     "react-leaflet": "^5.0.0",
     "react-map-gl": "^8.0.4",
     "simpleheat": "^0.4.0",

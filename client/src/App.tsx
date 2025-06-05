@@ -1,9 +1,19 @@
-import { useEffect, useState, useRef } from 'react';
-import { Calendar, ChevronDown, Loader2, MapPin, TrendingUp, Activity, Globe } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { MapPin, TrendingUp, Activity, Globe } from 'lucide-react';
 import BoxPlot from './component/BoxPlot';
 import DensityMap from './component/DensityMap';
 import DataTable from './component/DataTable';
 import RegionalActivityHotspots from './component/RegionalActivityHotspots';
+
+/**
+ * Global window extension to allow components to trigger date changes
+ * This enables interactive date selection from child components
+ */
+declare global {
+  interface Window {
+    selectDate?: (dateStr: string) => void;
+  }
+}
 
 interface OccurrencePoint {
   date: string;
@@ -19,6 +29,8 @@ interface ForecastPoint {
   range_south: number;
   range_east: number;
   range_west: number;
+  latitude: number;
+  longitude: number;
   confidence_interval?: {
     lower: number;
     upper: number;
@@ -40,16 +52,22 @@ interface TimeRange {
   currentMonth: number;
 }
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const AVAILABLE_YEARS = [2021, 2022, 2023, 2024, 2025, 2026];
+
 export default function App() {
+  // Core application state
   const [speciesList, setSpeciesList] = useState<string[]>([]);
   const [scientificNames, setScientificNames] = useState<Record<string, string>>({});
   const [selectedSpecies, setSelectedSpecies] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('2023-01-01');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  // Data state for different visualizations
   const [recentData, setRecentData] = useState<OccurrencePoint[]>([]);
-  const [heatmapUrl, setHeatmapUrl] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [scale, setScale] = useState(1);
   const [forecastData, setForecastData] = useState<ForecastPoint[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>({
     startYear: 2023,
@@ -58,55 +76,100 @@ export default function App() {
     endMonth: 12,
     currentYear: 2024,
     currentMonth: 1
-  });
-
-  // Fetch species list
+  });  /**
+   * Set up global date selection function for child components
+   * This allows any component to trigger a date change in the main app state
+   */
   useEffect(() => {
-    fetch('http://localhost:8000/species_list')
-      .then(res => res.json())
-      .then(data => {
-        setSpeciesList(data.species);
-        const map: Record<string, string> = {};
-        data.species.forEach((common: string, i: number) => {
-          map[common] = data.scientific_names[i];
-        });
-        setScientificNames(map);
-        if (data.species.length > 0) setSelectedSpecies(data.species[0]);
-      })
-      .catch(err => console.error("Error fetching species list:", err));
+    window.selectDate = (dateStr: string) => {
+      setCurrentDate(dateStr);
+    };
+
+    return () => {
+      delete window.selectDate;
+    };
   }, []);
 
-  // Fetch recent occurrences
+  /**
+   * Initialize species data on component mount
+   * Fetches available species and creates mapping from common to scientific names
+   */
   useEffect(() => {
-    if (selectedSpecies && scientificNames[selectedSpecies]) {
-      fetch(`http://localhost:8000/recent_occurrences/${encodeURIComponent(scientificNames[selectedSpecies])}`)
-        .then(res => res.json())
-        .then(data => setRecentData(data))
-        .catch(err => console.error("Error fetching recent occurrences:", err));
-    }
+    const loadSpeciesData = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/species_list');
+        const data = await response.json();
+
+        setSpeciesList(data.species);
+
+        // Create mapping from common names to scientific names for API calls
+        const nameMapping: Record<string, string> = {};
+        data.species.forEach((common: string, index: number) => {
+          nameMapping[common] = data.scientific_names[index];
+        });
+        setScientificNames(nameMapping);
+
+        // Auto-select first species if available
+        if (data.species.length > 0) {
+          setSelectedSpecies(data.species[0]);
+        }
+      } catch (error) {
+        console.error("Failed to load species data:", error);
+      }
+    };
+
+    loadSpeciesData();
+  }, []);
+
+  /**
+   * Load recent occurrence data when species selection changes
+   * Uses scientific name for API calls since that's what the backend expects
+   */
+  useEffect(() => {
+    const loadRecentOccurrences = async () => {
+      if (!selectedSpecies || !scientificNames[selectedSpecies]) {
+        return;
+      }
+
+      try {
+        const scientificName = scientificNames[selectedSpecies];
+        const response = await fetch(
+          `http://localhost:8000/recent_occurrences/${encodeURIComponent(scientificName)}`
+        );
+        const data = await response.json();
+        setRecentData(data);
+      } catch (error) {
+        console.error("Failed to load recent occurrences:", error);
+      }
+    };
+
+    loadRecentOccurrences();
   }, [selectedSpecies, scientificNames]);
 
-  // Fetch forecast data
+  /**
+   * Load forecast data and update time range when species changes
+   * Also calculates the available date range from the forecast data to set proper bounds
+   */
   useEffect(() => {
-    if (!selectedSpecies) return;
+    const loadForecastData = async () => {
+      if (!selectedSpecies) return;
 
-    const fetchForecastData = async () => {
       try {
-        const sciName = scientificNames[selectedSpecies];
-        if (!sciName) {
-          console.warn(`No scientific name mapping for: ${selectedSpecies}`);
+        const scientificName = scientificNames[selectedSpecies];
+        if (!scientificName) {
+          console.warn(`No scientific name mapping found for: ${selectedSpecies}`);
           setForecastData([]);
           return;
         }
 
         const response = await fetch(
-          `http://localhost:8000/forecasts/${encodeURIComponent(sciName)}`
+          `http://localhost:8000/forecasts/${encodeURIComponent(scientificName)}`
         );
-        
+
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data: SpeciesForecast = await response.json();
 
         if (!data.forecasts || data.forecasts.length === 0) {
@@ -114,108 +177,130 @@ export default function App() {
         }
 
         setForecastData(data.forecasts);
-        
-        if (data.forecasts.length > 0) {
-          const minDate = data.forecasts.reduce((min, f) => 
-            (f.year < min.year || (f.year === min.year && f.month < min.month)) ? f : min
-          );
-          
-          const maxDate = data.forecasts.reduce((max, f) => 
-            (f.year > max.year || (f.year === max.year && f.month > max.month)) ? f : max
-          );
-          
-          setTimeRange(prev => ({
-            ...prev,
-            startYear: minDate.year,
-            startMonth: minDate.month,
-            endYear: maxDate.year,
-            endMonth: maxDate.month,
-          }));
-        }
+
+        // Calculate time range bounds from forecast data for proper visualization scaling
+        const dateRange = calculateDateRange(data.forecasts);
+        setTimeRange(prev => ({
+          ...prev,
+          ...dateRange
+        }));
       } catch (error) {
-        console.error("Error fetching forecast data:", error);
+        console.error("Failed to load forecast data:", error);
         setForecastData([]);
       }
     };
 
-    fetchForecastData();
+    loadForecastData();
   }, [selectedSpecies, scientificNames]);
 
+  /**
+   * Helper function to find the min and max dates from forecast data
+   * This is used to set proper bounds for the time range visualization
+   */
+  const calculateDateRange = (forecasts: ForecastPoint[]) => {
+    const minDate = forecasts.reduce((min, forecast) =>
+      (forecast.year < min.year || (forecast.year === min.year && forecast.month < min.month))
+        ? forecast : min
+    );
+
+    const maxDate = forecasts.reduce((max, forecast) =>
+      (forecast.year > max.year || (forecast.year === max.year && forecast.month > max.month))
+        ? forecast : max
+    );
+
+    return {
+      startYear: minDate.year,
+      startMonth: minDate.month,
+      endYear: maxDate.year,
+      endMonth: maxDate.month,
+    };
+  };  // Parse current date for date picker controls
   const dateObj = new Date(currentDate);
   const year = dateObj.getFullYear();
   const month = dateObj.getMonth();
   const day = dateObj.getDate();
-  const maxDays = new Date(year, month + 1, 0).getDate();
 
-  const updateDate = (newYear: number, newMonth: number, newDay: number) => {
-    const safeDay = Math.min(newDay, new Date(newYear, newMonth + 1, 0).getDate());
-    const updated = new Date(newYear, newMonth, safeDay);
-    setCurrentDate(updated.toISOString().slice(0, 10));
+  // Calculate maximum valid days for the current month to prevent invalid dates
+  const maxDaysInCurrentMonth = new Date(year, month + 1, 0).getDate();
+
+  /**
+   * Updates the current date while ensuring the day is valid for the new month/year
+   * This prevents issues like selecting Feb 30th by clamping to valid range
+   */
+  const handleDateChange = (newYear: number, newMonth: number, newDay: number) => {
+    const maxDaysInNewMonth = new Date(newYear, newMonth + 1, 0).getDate();
+    const validDay = Math.min(newDay, maxDaysInNewMonth);
+    const updatedDate = new Date(newYear, newMonth, validDay);
+    setCurrentDate(updatedDate.toISOString().slice(0, 10));
   };
-
   return (
     <div className="h-screen bg-slate-900 overflow-hidden flex flex-col">
-      {/* Minimal inline header */}
+      {/* Top navigation bar with species selector and date controls */}
       <div className="bg-slate-800 px-2 py-1 flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">
-          <Globe className="w-3 h-3 text-blue-400" />
-          <span className="font-semibold text-white">Bird Migration Tracker</span>
+          <span className="text-white">Species:</span>
           <select
             value={selectedSpecies}
             onChange={(e) => setSelectedSpecies(e.target.value)}
-            className="bg-slate-700 text-white px-1 py-0.5 rounded text-xs"
+            className="bg-slate-700 text-white px-2 py-0.5 rounded text-xs"
           >
             {speciesList.map((species) => (
               <option key={species} value={species}>{species}</option>
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-1">
+
+        <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2">
+          <Globe className="w-4 h-4 text-blue-400" />
+          <span className="font-semibold text-white text-sm">Birds Across Time</span>
+        </div>
+
+        {/* Date selection controls */}
+        <div className="flex items-center gap-2">
           <select
             value={year}
-            onChange={e => updateDate(parseInt(e.target.value), month, day)}
-            className="bg-slate-700 text-white px-1 rounded text-xs"
+            onChange={e => handleDateChange(parseInt(e.target.value), month, day)}
+            className="bg-slate-700 text-white px-2 py-0.5 rounded text-xs"
           >
-            {[2021,2022,2023,2024,2025,2026].map(y => (
-              <option key={y} value={y}>{y}</option>
+            {AVAILABLE_YEARS.map(yearOption => (
+              <option key={yearOption} value={yearOption}>{yearOption}</option>
             ))}
           </select>
           <select
             value={month}
-            onChange={e => updateDate(year, parseInt(e.target.value), day)}
-            className="bg-slate-700 text-white px-1 rounded text-xs"
+            onChange={e => handleDateChange(year, parseInt(e.target.value), day)}
+            className="bg-slate-700 text-white px-2 py-0.5 rounded text-xs min-w-[80px]"
           >
-            {['J','F','M','A','M','J','J','A','S','O','N','D'].map((m, i) => (
-              <option key={i} value={i}>{m}</option>
+            {MONTH_NAMES.map((monthName, index) => (
+              <option key={index} value={index}>{monthName}</option>
             ))}
           </select>
           <input
             type="range"
             min={1}
-            max={maxDays}
+            max={maxDaysInCurrentMonth}
             value={day}
-            onChange={e => updateDate(year, month, parseInt(e.target.value))}
-            className="w-10 h-1"
+            onChange={e => handleDateChange(year, month, parseInt(e.target.value))}
+            className="w-20 h-2"
           />
-          <span className="text-white">{day}</span>
+          <span className="text-white min-w-[20px]">{day}</span>
         </div>
-      </div>
-
-      {/* Main content - custom grid */}
-      <div className="flex-1 p-1 grid gap-1" style={{ 
+      </div>      {/* Main dashboard grid layout */}
+      <div className="flex-1 p-1 grid gap-1" style={{
         display: 'grid',
-        gridTemplateColumns: '55% 42%',
-        gridTemplateRows: '49% 53%',
+        gridTemplateColumns: '58% 42%',
+        gridTemplateRows: '49% 51%',
         height: 'calc(100vh - 28px)'
       }}>
-        {/* Heatmap - wider for USA map */}
+        {/* Geographic occurrence visualization - takes up larger left area */}
         <div className="bg-slate-800 rounded overflow-hidden">
           <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
             <Activity className="w-3 h-3 text-blue-400" />
-            Heatmap
+            Occurrence Map
           </div>
           <div style={{ height: 'calc(100% - 20px)' }}>
             <DensityMap
+              key={`${selectedSpecies}-${currentDate}`}
               currentDate={currentDate}
               selectedSpecies={selectedSpecies}
               scientificNames={scientificNames}
@@ -223,28 +308,31 @@ export default function App() {
           </div>
         </div>
 
-        {/* Box Plot - narrower */}
+        {/* Seasonal variation analysis - compact visualization */}
         <div className="bg-slate-800 rounded overflow-hidden">
           <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
             <TrendingUp className="w-3 h-3 text-green-400" />
-            Monthly
+            Species Seasonal Variation
           </div>
           <div style={{ height: 'calc(100% - 20px)' }}>
             {selectedSpecies && scientificNames[selectedSpecies] && (
-              <BoxPlot scientificName={scientificNames[selectedSpecies]} />
+              <BoxPlot
+                scientificName={scientificNames[selectedSpecies]}
+                currentDate={currentDate}
+              />
             )}
           </div>
         </div>
 
-        {/* Regional Activity - taller for line chart */}
+        {/* Forecast predictions - displays temporal trends */}
         <div className="bg-slate-800 rounded overflow-hidden">
           <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
             <Globe className="w-3 h-3 text-purple-400" />
-            Regional
+            Predicted Species Occurrences
           </div>
           <div style={{ height: 'calc(100% - 20px)' }}>
             {forecastData.length > 0 ? (
-              <RegionalActivityHotspots 
+              <RegionalActivityHotspots
                 data={forecastData}
                 timeRange={timeRange}
                 currentDate={currentDate}
@@ -257,18 +345,22 @@ export default function App() {
           </div>
         </div>
 
-        {/* Table - can scroll */}
+        {/* Recent observations data table - scrollable for detailed records */}
         <div className="bg-slate-800 rounded overflow-hidden">
           <div className="bg-slate-700 px-1 py-0.5 text-xs font-semibold text-white flex items-center gap-1">
             <MapPin className="w-3 h-3 text-orange-400" />
-            Sightings ({recentData.length})
+            Recent Sightings ({recentData.length})
           </div>
           <div style={{ height: 'calc(100% - 20px)' }} className="overflow-auto">
             {recentData.length > 0 ? (
-              <DataTable occurrences={recentData} />
+              <DataTable
+                occurrences={recentData}
+                currentDate={currentDate}
+                scientificName={scientificNames[selectedSpecies]}
+              />
             ) : (
               <div className="flex items-center justify-center h-full">
-                <p className="text-slate-400 text-xs">No data</p>
+                <p className="text-slate-400 text-xs">No data available</p>
               </div>
             )}
           </div>
