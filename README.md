@@ -70,7 +70,7 @@ net start MongoDB
 1. Navigate to the client directory:
 
 ```powershell
-cd ..\client
+cd ../client
 ```
 
 2. Install Node.js dependencies:
