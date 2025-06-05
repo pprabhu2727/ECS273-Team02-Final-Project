@@ -155,6 +155,8 @@ Open your web browser and go to `http://localhost:5173` to view the interactive 
 
 ### Demo Walkthrough
 
+Check out the video walkthrough on YouTube: [Watch the Demo](https://youtu.be/WfaZzgi_wyw)
+
 Once the application is running, you can explore the following features:
 
 1. **Species Selection** - Use the dropdown menu to select from North American bird species. Other views will update
@@ -163,6 +165,7 @@ Once the application is running, you can explore the following features:
 4. **Forecasting Charts** - View machine learning predictions for future distribution trends. Can hover over the multi-line chart to see more details. 
 5. **Recent Observations** - Browse the most recent bird sightings in tabular format. Can sort by date, lattitude, or longitude by clicking the table header. 
 6. **Seasonal Patterns** - Examine box plots showing how observation patterns change throughout the year. Can hover over the plots to see details about each month. 
+
 
 The demo includes sample data for species like American Robin, Northern Cardinal, and Blue Jay, with observations spanning multiple years to demonstrate seasonal and annual trends.
 
