@@ -83,14 +83,14 @@ npm install
 
 ### Step 4: Database Setup
 
-1. Return to the server directory and populate the database with  data:
-
-If you want to load ALL our data follow these steps, otherwise skip this step (as data folder is already loaded with small sample dataset)
+1. Return to the server directory and populate the database with data:
+If you skip this step, our sample dataset is already included but the dashboard output will not be as populated. (and the dates are limited) 
+This is a long process, as we have over 5 million entries.
 - Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
 - Unzip the folder and replace the current data file, located: ./server/data/{The data files}
 - Again, this will take hours to full load data to our database, so for testing, it is reccommend to skip this step.
 Note that there are over 5 million entries if using the entire dataset from the google drive link. 
-Our small sample dataset has under 200K entires, so it will process much faster for you.
+Our small sample dataset has under 200K entires, so it will process much faster for you but will cause the dashboard to be Null for the dates that are not included in the small dataset.
 
 ### Step 5: Load Data into MongoDB 
  1. Make your way to the server directory
@@ -111,7 +111,7 @@ For testing, please use the small sample datset that is already preloaded. (no n
 ```powershell
 python predictions.py
 ```
-This process will take a while if using FULL dataset from Google Drive link. 
+This process will take a while, as there is alot of data. 
 
 ## Execution
 
