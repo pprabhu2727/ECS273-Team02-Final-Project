@@ -192,3 +192,6 @@ The visualization includes data for ten common North American bird species:
 - Black-capped Chickadee (Poecile atricapillus)
 - Red-bellied Woodpecker (Melanerpes carolinus)
 - Eastern Bluebird (Sialia sialis)
+
+
+###### Note that ChatGPT was used to help us learn syntax of the programming languages used (like Typscript and Python), help with adding debugging statements, help make visualizations look more appealing, along with making code more efficent (wiht priority on computation time, since working large dataset time is a key constraint)
