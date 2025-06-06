@@ -95,7 +95,7 @@ Our small sample dataset has under 200K entires, so it will process much faster 
 ### Step 5: Load Data into MongoDB 
  1. Make your way to the server directory
 ```powershell
-cd..
+cd ..
 cd server
 ```   
 Then, 
