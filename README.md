@@ -84,7 +84,7 @@ npm install
 ### Step 4: Database Setup
 
 1. Return to the server directory and populate the database with data:
-If you skip this step, our sample dataset is already included but the dashboard output will not be as populated and the boxplot view may not be functional. (and the dates are limited) 
+If you skip this step, our sample dataset is already included, but the dashboard output will not be as populated, and the boxplot view may not be functional (may show a constant occurrence count for each month because of how the sample data is set up). (and the dates are limited) 
 This is a long process, as we have over 5 million entries.
 - Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
 - Unzip the folder and replace the current data file, located: ./server/data/{The data files}
