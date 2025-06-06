@@ -87,7 +87,7 @@ npm install
 If you skip this step, our sample dataset is already included, but the dashboard output will not be as populated, and the boxplot view may not be functional (may show a constant occurrence count for each month because of how the sample data is set up). (and the dates are limited) 
 This is a long process, as we have over 5 million entries.
 - Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
-- Unzip the folder and replace the current data file, located: ./server/data/{The data files}
+- Unzip the folder and replace the current data file, located: ./server/data
 - Again, this will take hours to full load data to our database, so for testing, it is reccommend to skip this step.
 Note that there are over 5 million entries if using the entire dataset from the google drive link. 
 Our small sample dataset has under 200K entires, so it will process much faster for you but will cause the dashboard to be Null for the dates that are not included in the small dataset.
