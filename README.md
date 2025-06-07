@@ -85,8 +85,11 @@ npm install
 
 1. Return to the server directory and populate the database with data: 
 If you skip this step, our sample dataset is already included, but the dashboard output will not be as populated (the dates/species with valid data are also limited, map will show very little points at some dates [Jan 2023 for American Robin is a good options]), and the predictions/boxplot may not be representative (due to how the sample data is setup, but the views still function.).  However despite these disadvantages, we still recommend using this sample data for testing as loading the full data is a multi-hour process, as we have over 5 million entries that need to be moved into a database and put into a prediction algorithm (Note that running the full data may also cause very long loading times for the visuals and UI due to the amount of data the front end needs to process, another reason why we recommend using the sample data).
+
+
 - Full Data Load: Download the zip file from: https://drive.google.com/file/d/1FiSKbXRBwzHh25gqmQSLUeDFq2Enx-R2/view?usp=sharing
 - Unzip the folder and replace the current data file, located: ./server/data
+- Additionally, please delete the files within ./server/static (as these were populated with our smaller mock sample data)
 - Again, this will take hours to full load data to our database, so for testing, it is reccommend to skip this step.
 Note that there are over 5 million entries if using the entire dataset from the google drive link. 
 Our small sample dataset has under 200K entires, so it will process much faster for you but will cause the dashboard to be Null for the dates that are not included in the small dataset.
